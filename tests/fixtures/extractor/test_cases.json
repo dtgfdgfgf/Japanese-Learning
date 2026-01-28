@@ -1,0 +1,89 @@
+{
+  "vocab_only": {
+    "input": "考える（かんがえる）：思考、考慮\n食べる（たべる）：吃\n美しい（うつくしい）：美麗的",
+    "expected_items": [
+      {
+        "item_type": "vocab",
+        "key": "vocab:考える",
+        "surface": "考える",
+        "reading": "かんがえる",
+        "pos": "verb",
+        "glossary_zh": ["思考", "考慮"]
+      },
+      {
+        "item_type": "vocab",
+        "key": "vocab:食べる",
+        "surface": "食べる",
+        "reading": "たべる",
+        "pos": "verb",
+        "glossary_zh": ["吃"]
+      },
+      {
+        "item_type": "vocab",
+        "key": "vocab:美しい",
+        "surface": "美しい",
+        "reading": "うつくしい",
+        "pos": "i-adjective",
+        "glossary_zh": ["美麗的"]
+      }
+    ],
+    "expected_vocab_count": 3,
+    "expected_grammar_count": 0
+  },
+  "grammar_only": {
+    "input": "日本に行ったことがある（我去過日本）\n〜たことがある 是表示經驗的文法\n財布を忘れてしまった（不小心忘了錢包）\n〜てしまう 表示遺憾或動作完了",
+    "expected_items": [
+      {
+        "item_type": "grammar",
+        "key": "grammar:〜たことがある",
+        "pattern": "〜たことがある",
+        "meaning_zh": "曾經做過某事"
+      },
+      {
+        "item_type": "grammar",
+        "key": "grammar:〜てしまう",
+        "pattern": "〜てしまう",
+        "meaning_zh": "表示遺憾或動作完了"
+      }
+    ],
+    "expected_vocab_count": 0,
+    "expected_grammar_count": 2
+  },
+  "mixed": {
+    "input": "もう少し考えてみます。（我再想想看）\n「考える」是動詞，「〜てみる」是表示嘗試的文法。",
+    "expected_items": [
+      {
+        "item_type": "vocab",
+        "key": "vocab:考える"
+      },
+      {
+        "item_type": "grammar",
+        "key": "grammar:〜てみる"
+      }
+    ],
+    "expected_vocab_count": 1,
+    "expected_grammar_count": 1
+  },
+  "empty": {
+    "input": "Hello, this is an English text with no Japanese content.",
+    "expected_items": [],
+    "expected_vocab_count": 0,
+    "expected_grammar_count": 0,
+    "expected_warning": "No extractable Japanese content"
+  },
+  "long_text": {
+    "input": "日本語の長い文章です。これはテストのために使われます。システムは最大20個のアイテムを抽出します。ユーザーは必要に応じて追加の分析をリクエストできます。考える（かんがえる）、食べる（たべる）、飲む（のむ）、書く（かく）、読む（よむ）、聞く（きく）、話す（はなす）、見る（みる）、行く（いく）、来る（くる）、する、ある、いる、できる、わかる、知る（しる）、思う（おもう）、言う（いう）、持つ（もつ）、使う（つかう）、買う（かう）、売る（うる）。",
+    "should_truncate": true,
+    "max_expected_items": 20
+  },
+  "with_examples": {
+    "input": "先生に聞いてみた（試著問了老師）\n〜てみる：嘗試做某事\n例句：新しいレストランに行ってみたい（想試試去新餐廳）",
+    "expected_items": [
+      {
+        "item_type": "grammar",
+        "key": "grammar:〜てみる",
+        "example": "新しいレストランに行ってみたい"
+      }
+    ]
+  }
+}

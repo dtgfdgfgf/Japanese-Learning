@@ -1,0 +1,99 @@
+{
+  "exact_match": {
+    "input": "考える",
+    "expected": "考える",
+    "should_be_correct": true
+  },
+  "kana_kanji_equivalent": {
+    "input": "かんがえる",
+    "expected": "考える",
+    "should_be_correct": true,
+    "note": "Reading should match kanji surface"
+  },
+  "width_conversion": {
+    "cases": [
+      {
+        "input": "ＡＢＣ",
+        "expected": "ABC",
+        "should_be_correct": true
+      },
+      {
+        "input": "１２３",
+        "expected": "123",
+        "should_be_correct": true
+      }
+    ]
+  },
+  "whitespace_handling": {
+    "cases": [
+      {
+        "input": "  考える  ",
+        "expected": "考える",
+        "should_be_correct": true
+      },
+      {
+        "input": "考 え る",
+        "expected": "考える",
+        "should_be_correct": false,
+        "note": "Internal whitespace should not match"
+      }
+    ]
+  },
+  "case_insensitive": {
+    "cases": [
+      {
+        "input": "HELLO",
+        "expected": "hello",
+        "should_be_correct": true
+      },
+      {
+        "input": "Hello World",
+        "expected": "hello world",
+        "should_be_correct": true
+      }
+    ]
+  },
+  "wrong_answer": {
+    "cases": [
+      {
+        "input": "食べる",
+        "expected": "考える",
+        "should_be_correct": false
+      },
+      {
+        "input": "completely wrong",
+        "expected": "考える",
+        "should_be_correct": false
+      }
+    ]
+  },
+  "empty_strings": {
+    "cases": [
+      {
+        "input": "",
+        "expected": "",
+        "should_be_correct": true
+      },
+      {
+        "input": "",
+        "expected": "考える",
+        "should_be_correct": false
+      }
+    ]
+  },
+  "grammar_patterns": {
+    "cases": [
+      {
+        "input": "〜てしまう",
+        "expected": "〜てしまう",
+        "should_be_correct": true
+      },
+      {
+        "input": "てしまう",
+        "expected": "〜てしまう",
+        "should_be_correct": true,
+        "note": "Without tilde should still match"
+      }
+    ]
+  }
+}

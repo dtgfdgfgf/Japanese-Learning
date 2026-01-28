@@ -1,0 +1,165 @@
+"""
+Pydantic schemas for Extractor service.
+
+T035: Create Pydantic schemas for Extractor
+DoD: ExtractorRequest, ExtractorResponse, ExtractedItem schemas 符合 plan.md Extractor Output
+"""
+
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class ExtractedItem(BaseModel):
+    """Represents a single extracted vocabulary or grammar item."""
+    
+    item_type: str = Field(
+        ...,
+        description="Type of item: 'vocab' or 'grammar'",
+        pattern="^(vocab|grammar)$"
+    )
+    key: str = Field(
+        ...,
+        description="Unique key for the item, e.g., 'vocab:考える' or 'grammar:〜てしまう'"
+    )
+    surface: Optional[str] = Field(
+        None,
+        description="Surface form for vocab items (e.g., '考える')"
+    )
+    reading: Optional[str] = Field(
+        None,
+        description="Reading in hiragana (e.g., 'かんがえる')"
+    )
+    pos: Optional[str] = Field(
+        None,
+        description="Part of speech (e.g., 'verb', 'noun', 'i-adjective')"
+    )
+    glossary_zh: Optional[list[str]] = Field(
+        None,
+        description="Chinese glossary translations"
+    )
+    pattern: Optional[str] = Field(
+        None,
+        description="Grammar pattern (e.g., '〜てしまう')"
+    )
+    meaning_zh: Optional[str] = Field(
+        None,
+        description="Chinese meaning for grammar items"
+    )
+    form_notes: Optional[str] = Field(
+        None,
+        description="Formation notes (e.g., 'Vて + しまう')"
+    )
+    example: Optional[str] = Field(
+        None,
+        description="Example sentence"
+    )
+    example_translation: Optional[str] = Field(
+        None,
+        description="Example sentence translation"
+    )
+    source_quote: Optional[str] = Field(
+        None,
+        description="Original text quote this item was extracted from"
+    )
+    confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Extraction confidence score"
+    )
+
+    def to_payload(self) -> dict:
+        """Convert to payload dict for Item model."""
+        if self.item_type == "vocab":
+            return {
+                "surface": self.surface,
+                "reading": self.reading,
+                "pos": self.pos,
+                "glossary_zh": self.glossary_zh or [],
+                "example": self.example,
+                "example_translation": self.example_translation,
+            }
+        else:  # grammar
+            return {
+                "pattern": self.pattern,
+                "meaning_zh": self.meaning_zh,
+                "form_notes": self.form_notes,
+                "example": self.example,
+                "example_translation": self.example_translation,
+            }
+
+
+class ExtractorRequest(BaseModel):
+    """Request payload for Extractor service."""
+    
+    doc_id: str = Field(..., description="Document ID to extract from")
+    raw_text: str = Field(..., description="Raw text content to analyze")
+    max_items: int = Field(
+        default=20,
+        ge=1,
+        le=50,
+        description="Maximum number of items to extract"
+    )
+    lang_hint: Optional[str] = Field(
+        default=None,
+        description="Language hint (e.g., 'ja')"
+    )
+
+
+class ExtractorResponse(BaseModel):
+    """Response from Extractor service."""
+    
+    doc_id: str = Field(..., description="Document ID that was processed")
+    items: list[ExtractedItem] = Field(
+        default_factory=list,
+        description="List of extracted items"
+    )
+    vocab_count: int = Field(default=0, description="Number of vocabulary items")
+    grammar_count: int = Field(default=0, description="Number of grammar items")
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Any warnings during extraction"
+    )
+    
+    @classmethod
+    def from_items(cls, doc_id: str, items: list[ExtractedItem]) -> "ExtractorResponse":
+        """Create response from list of items."""
+        vocab_count = sum(1 for item in items if item.item_type == "vocab")
+        grammar_count = sum(1 for item in items if item.item_type == "grammar")
+        return cls(
+            doc_id=doc_id,
+            items=items,
+            vocab_count=vocab_count,
+            grammar_count=grammar_count,
+        )
+
+
+class ExtractionSummary(BaseModel):
+    """Summary of extraction for LINE reply."""
+    
+    vocab_count: int = Field(default=0, description="Number of vocabulary items")
+    grammar_count: int = Field(default=0, description="Number of grammar items")
+    total_count: int = Field(default=0, description="Total items extracted")
+    is_truncated: bool = Field(
+        default=False,
+        description="Whether the extraction was truncated due to max_items"
+    )
+    
+    def to_message(self) -> str:
+        """Format as LINE reply message."""
+        if self.total_count == 0:
+            return "沒有發現可學習的單字或文法 📝"
+        
+        parts = []
+        if self.vocab_count > 0:
+            parts.append(f"{self.vocab_count} 個單字")
+        if self.grammar_count > 0:
+            parts.append(f"{self.grammar_count} 個文法")
+        
+        message = f"✨ 抽出 {' 和 '.join(parts)}"
+        
+        if self.is_truncated:
+            message += "\n（內容較長，已限制抽取數量）"
+        
+        return message

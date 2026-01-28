@@ -1,0 +1,186 @@
+{
+  "vocab_samples": [
+    {
+      "raw_text": "考える",
+      "expected_items": [
+        {
+          "item_type": "vocab",
+          "key": "vocab:考える",
+          "payload": {
+            "surface": "考える",
+            "reading": "かんがえる",
+            "pos": "verb",
+            "glossary_zh": ["思考", "考慮"]
+          }
+        }
+      ]
+    },
+    {
+      "raw_text": "食べる（たべる）：吃",
+      "expected_items": [
+        {
+          "item_type": "vocab",
+          "key": "vocab:食べる",
+          "payload": {
+            "surface": "食べる",
+            "reading": "たべる",
+            "pos": "verb",
+            "glossary_zh": ["吃"]
+          }
+        }
+      ]
+    },
+    {
+      "raw_text": "美しい景色を見た。（うつくしい けしき を みた）",
+      "expected_items": [
+        {
+          "item_type": "vocab",
+          "key": "vocab:美しい",
+          "payload": {
+            "surface": "美しい",
+            "reading": "うつくしい",
+            "pos": "i-adjective",
+            "glossary_zh": ["美麗的", "漂亮的"]
+          }
+        },
+        {
+          "item_type": "vocab",
+          "key": "vocab:景色",
+          "payload": {
+            "surface": "景色",
+            "reading": "けしき",
+            "pos": "noun",
+            "glossary_zh": ["景色", "風景"]
+          }
+        }
+      ]
+    }
+  ],
+  "grammar_samples": [
+    {
+      "raw_text": "財布を忘れてしまった。（不小心忘了帶錢包）",
+      "expected_items": [
+        {
+          "item_type": "grammar",
+          "key": "grammar:〜てしまう",
+          "payload": {
+            "pattern": "〜てしまう",
+            "meaning_zh": "表示遺憾/不小心做了某事",
+            "form_notes": "Vて + しまう"
+          }
+        }
+      ]
+    },
+    {
+      "raw_text": "日本に行ったことがある。（我去過日本）",
+      "expected_items": [
+        {
+          "item_type": "grammar",
+          "key": "grammar:〜たことがある",
+          "payload": {
+            "pattern": "〜たことがある",
+            "meaning_zh": "曾經做過某事",
+            "form_notes": "Vた + ことがある"
+          }
+        }
+      ]
+    }
+  ],
+  "mixed_samples": [
+    {
+      "raw_text": "もう少し考えてみます。（我再想想看）這裡的「考える」是動詞，「〜てみる」是表示嘗試的文法。",
+      "expected_items": [
+        {
+          "item_type": "vocab",
+          "key": "vocab:考える"
+        },
+        {
+          "item_type": "grammar",
+          "key": "grammar:〜てみる"
+        }
+      ]
+    },
+    {
+      "raw_text": "彼は毎日運動しているらしい。聽說他每天都在運動。",
+      "expected_items": [
+        {
+          "item_type": "vocab",
+          "key": "vocab:運動"
+        },
+        {
+          "item_type": "grammar",
+          "key": "grammar:〜らしい"
+        }
+      ]
+    }
+  ],
+  "edge_cases": [
+    {
+      "description": "Pure Chinese text",
+      "raw_text": "今天天氣很好",
+      "expected_lang": "unknown",
+      "expected_items": []
+    },
+    {
+      "description": "English text",
+      "raw_text": "Hello, how are you?",
+      "expected_lang": "unknown",
+      "expected_items": []
+    },
+    {
+      "description": "Very short text",
+      "raw_text": "あ",
+      "expected_lang": "ja",
+      "expected_warnings": ["content_too_short"]
+    },
+    {
+      "description": "Long text (should limit items)",
+      "raw_text": "日本語の文章が長い場合、システムは最大20個のアイテムを抽出します。これはパフォーマンスを考慮した設計です。ユーザーは必要に応じて追加の分析をリクエストできます。",
+      "expected_max_items": 20
+    }
+  ],
+  "command_samples": [
+    {
+      "input": "入庫",
+      "expected_command": "save"
+    },
+    {
+      "input": "分析",
+      "expected_command": "analyze"
+    },
+    {
+      "input": "練習",
+      "expected_command": "practice"
+    },
+    {
+      "input": "查詢 考える",
+      "expected_command": "search",
+      "expected_keyword": "考える"
+    },
+    {
+      "input": "查詢",
+      "expected_command": "search",
+      "expected_keyword": null
+    },
+    {
+      "input": "刪除最後一筆",
+      "expected_command": "delete_last"
+    },
+    {
+      "input": "清空資料",
+      "expected_command": "delete_all"
+    },
+    {
+      "input": "隱私",
+      "expected_command": "privacy"
+    },
+    {
+      "input": "說明",
+      "expected_command": "help"
+    },
+    {
+      "input": "隨便打的文字",
+      "expected_command": "unknown"
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "save_intent": [
+    {
+      "message": "今日は天気がいいですね。散歩に行きましょう。",
+      "expected_intent": "save",
+      "min_confidence": 0.6
+    },
+    {
+      "message": "食べる - to eat\n飲む - to drink\n寝る - to sleep",
+      "expected_intent": "save",
+      "min_confidence": 0.7
+    },
+    {
+      "message": "〜てしまう：表示完成或遺憾的文法",
+      "expected_intent": "save",
+      "min_confidence": 0.6
+    }
+  ],
+  "practice_intent": [
+    {
+      "message": "我要練習",
+      "expected_intent": "practice",
+      "min_confidence": 0.7
+    },
+    {
+      "message": "來個測驗吧",
+      "expected_intent": "practice",
+      "min_confidence": 0.6
+    },
+    {
+      "message": "複習一下",
+      "expected_intent": "practice",
+      "min_confidence": 0.6
+    }
+  ],
+  "chat_intent": [
+    {
+      "message": "這個文法怎麼用？",
+      "expected_intent": "chat",
+      "min_confidence": 0.5
+    },
+    {
+      "message": "〜てしまう和〜ちゃう有什麼不同",
+      "expected_intent": "chat",
+      "min_confidence": 0.5
+    },
+    {
+      "message": "你好",
+      "expected_intent": "chat",
+      "min_confidence": 0.5
+    }
+  ],
+  "search_intent": [
+    {
+      "message": "找一下「考える」",
+      "expected_intent": "search",
+      "expected_keyword": "考える",
+      "min_confidence": 0.6
+    },
+    {
+      "message": "考える是什麼意思",
+      "expected_intent": "search",
+      "expected_keyword": "考える",
+      "min_confidence": 0.5
+    }
+  ],
+  "help_intent": [
+    {
+      "message": "你能做什麼",
+      "expected_intent": "help",
+      "min_confidence": 0.6
+    },
+    {
+      "message": "怎麼用",
+      "expected_intent": "help",
+      "min_confidence": 0.5
+    }
+  ],
+  "ambiguous": [
+    {
+      "message": "あ",
+      "note": "Single character, hard to determine",
+      "expected_low_confidence": true
+    },
+    {
+      "message": "ok",
+      "note": "Very short, ambiguous",
+      "expected_low_confidence": true
+    }
+  ]
+}

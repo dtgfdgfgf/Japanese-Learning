@@ -1,0 +1,135 @@
+{
+  "vocab_items": [
+    {
+      "item_type": "vocab",
+      "key": "vocab:考える",
+      "payload": {
+        "surface": "考える",
+        "reading": "かんがえる",
+        "pos": "verb",
+        "glossary_zh": ["思考", "考慮"]
+      }
+    },
+    {
+      "item_type": "vocab",
+      "key": "vocab:食べる",
+      "payload": {
+        "surface": "食べる",
+        "reading": "たべる",
+        "pos": "verb",
+        "glossary_zh": ["吃"]
+      }
+    },
+    {
+      "item_type": "vocab",
+      "key": "vocab:美しい",
+      "payload": {
+        "surface": "美しい",
+        "reading": "うつくしい",
+        "pos": "i-adjective",
+        "glossary_zh": ["美麗的", "漂亮的"]
+      }
+    },
+    {
+      "item_type": "vocab",
+      "key": "vocab:勉強",
+      "payload": {
+        "surface": "勉強",
+        "reading": "べんきょう",
+        "pos": "noun",
+        "glossary_zh": ["學習", "用功"]
+      }
+    },
+    {
+      "item_type": "vocab",
+      "key": "vocab:先生",
+      "payload": {
+        "surface": "先生",
+        "reading": "せんせい",
+        "pos": "noun",
+        "glossary_zh": ["老師"]
+      }
+    },
+    {
+      "item_type": "vocab",
+      "key": "vocab:学生",
+      "payload": {
+        "surface": "学生",
+        "reading": "がくせい",
+        "pos": "noun",
+        "glossary_zh": ["學生"]
+      }
+    }
+  ],
+  "grammar_items": [
+    {
+      "item_type": "grammar",
+      "key": "grammar:〜てみる",
+      "payload": {
+        "pattern": "〜てみる",
+        "meaning_zh": "嘗試做某事",
+        "form_notes": "Vて形 + みる",
+        "example": "新しいレストランに行ってみたい"
+      }
+    },
+    {
+      "item_type": "grammar",
+      "key": "grammar:〜たことがある",
+      "payload": {
+        "pattern": "〜たことがある",
+        "meaning_zh": "曾經做過某事",
+        "form_notes": "Vた + ことがある",
+        "example": "日本に行ったことがある"
+      }
+    },
+    {
+      "item_type": "grammar",
+      "key": "grammar:〜てしまう",
+      "payload": {
+        "pattern": "〜てしまう",
+        "meaning_zh": "表示遺憾或完了",
+        "form_notes": "Vて + しまう",
+        "example": "財布を忘れてしまった"
+      }
+    },
+    {
+      "item_type": "grammar",
+      "key": "grammar:〜ている",
+      "payload": {
+        "pattern": "〜ている",
+        "meaning_zh": "正在做某事/狀態持續",
+        "form_notes": "Vて + いる",
+        "example": "今、本を読んでいる"
+      }
+    },
+    {
+      "item_type": "grammar",
+      "key": "grammar:〜たい",
+      "payload": {
+        "pattern": "〜たい",
+        "meaning_zh": "想要做某事",
+        "form_notes": "V連用形 + たい",
+        "example": "日本に行きたい"
+      }
+    }
+  ],
+  "expected_question_formats": {
+    "vocab_recall": {
+      "pattern": "「{meaning}」的日文是？",
+      "example": "「思考」的日文是？"
+    },
+    "grammar_cloze": {
+      "pattern": "{cloze_sentence}\n（提示：{meaning}）",
+      "example": "新しいレストランに行って____\n（提示：嘗試做某事）"
+    }
+  },
+  "selection_priority_test": {
+    "description": "Test item selection priorities",
+    "priorities": [
+      "1. Items added within 24 hours",
+      "2. Items with error rate > 30% in last 7 days",
+      "3. Items not practiced in 7+ days",
+      "4. Random selection"
+    ]
+  }
+}
