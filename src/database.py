@@ -30,6 +30,11 @@ engine = create_async_engine(
     pool_pre_ping=True,  # Verify connections before use
     pool_size=5,
     max_overflow=10,
+    pool_timeout=30,  # Wait up to 30s for a connection
+    connect_args={
+        "timeout": 30,  # Connection timeout
+        "server_settings": {"application_name": "japanese-learning-bot"},
+    },
 )
 
 # Session factory

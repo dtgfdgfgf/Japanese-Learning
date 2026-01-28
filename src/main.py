@@ -32,11 +32,16 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"Starting application in {settings.app_env} mode")
 
-    if settings.is_development:
-        # In development, create tables if they don't exist
-        # In production, use Alembic migrations
-        await init_db()
-        logger.info("Database initialized")
+    # Try to initialize database, but don't fail startup if it times out
+    try:
+        if settings.is_development:
+            # In development, create tables if they don't exist
+            # In production, use Alembic migrations
+            await init_db()
+            logger.info("Database initialized")
+    except Exception as e:
+        logger.warning(f"Database initialization skipped: {e}")
+        # Don't fail startup - database will connect on first request
 
     yield
 
