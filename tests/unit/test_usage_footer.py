@@ -1,12 +1,44 @@
 """
 format_usage_footer 的單元測試。
 
-測試各種情境：正常、額度用盡、升級提示、零 token。
+測試各種情境：正常、額度用盡、升級提示、零 token、花費顯示。
 """
 
 import pytest
 
-from src.templates.messages import format_usage_footer, format_mode_switch_confirm
+from src.templates.messages import (
+    calculate_cost,
+    format_mode_switch_confirm,
+    format_usage_footer,
+)
+
+
+class TestCalculateCost:
+    """測試花費計算。"""
+
+    def test_free_mode_zero_cost(self):
+        """免費模式花費應為 0。"""
+        assert calculate_cost("free", 1000, 500) == 0.0
+
+    def test_cheap_mode_cost(self):
+        """便宜模式：$3/$15 per MTok。"""
+        cost = calculate_cost("cheap", 1_000_000, 1_000_000)
+        assert cost == pytest.approx(18.0)  # 3 + 15
+
+    def test_rigorous_mode_cost(self):
+        """嚴謹模式：$5/$25 per MTok。"""
+        cost = calculate_cost("rigorous", 1_000_000, 1_000_000)
+        assert cost == pytest.approx(30.0)  # 5 + 25
+
+    def test_small_token_cost(self):
+        """少量 token 的成本計算。"""
+        # 404 in + 62 out with cheap: (404*3 + 62*15) / 1M = 0.002142
+        cost = calculate_cost("cheap", 404, 62)
+        assert cost == pytest.approx(0.002142)
+
+    def test_unknown_mode_zero_cost(self):
+        """未知模式花費應為 0。"""
+        assert calculate_cost("unknown", 1000, 500) == 0.0
 
 
 class TestFormatUsageFooter:
@@ -27,6 +59,30 @@ class TestFormatUsageFooter:
         assert "100 in" in result
         assert "50 out" in result
         assert "免費" in result
+        assert "$0" in result
+
+    def test_cheap_mode_shows_cost(self):
+        """便宜模式應顯示非零花費。"""
+        result = format_usage_footer(
+            daily_used=1000,
+            daily_cap=50000,
+            in_tokens=404,
+            out_tokens=62,
+            mode="cheap",
+        )
+        assert "$0.0021" in result
+
+    def test_rigorous_mode_shows_cost(self):
+        """嚴謹模式應顯示花費。"""
+        result = format_usage_footer(
+            daily_used=1000,
+            daily_cap=50000,
+            in_tokens=1000,
+            out_tokens=500,
+            mode="rigorous",
+        )
+        # (1000*5 + 500*25) / 1M = 0.0175
+        assert "$0.0175" in result
 
     def test_zero_tokens_this_request(self):
         """本次 token 為 0 的情況（如 postback 事件）。"""
@@ -63,7 +119,6 @@ class TestFormatUsageFooter:
             mode="cheap",
         )
         assert "嚴謹" in result
-        # 應有升級提示
         assert "額度" in result or "切換" in result
 
     def test_no_upgrade_hint_for_rigorous(self):
@@ -75,7 +130,6 @@ class TestFormatUsageFooter:
             out_tokens=50,
             mode="rigorous",
         )
-        # 不應包含升級提示文字
         lines = result.split("\n")
         upgrade_lines = [l for l in lines if "免費額度剩餘" in l]
         assert len(upgrade_lines) == 0
@@ -90,18 +144,6 @@ class TestFormatUsageFooter:
             mode="free",
         )
         assert "0%" in result
-
-    def test_estimated_cost(self):
-        """提供成本估算時應顯示。"""
-        result = format_usage_footer(
-            daily_used=10000,
-            daily_cap=50000,
-            in_tokens=100,
-            out_tokens=50,
-            mode="free",
-            estimated_cost=0.0123,
-        )
-        assert "$0.0123" in result
 
     def test_all_modes_have_labels(self):
         """三種模式都應有對應的中文標籤。"""

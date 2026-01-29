@@ -179,7 +179,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "COST_TOTAL_LINE": "\n💰 總計：${total:.4f}",
 
     # ========== Footer / 模式相關 ==========
-    "FOOTER_USAGE": "📊API使用度：今日 {pct}%（{used_k}k / {cap_k}k tokens）｜本次 {in_tokens} in + {out_tokens} out",
+    "FOOTER_USAGE": "📊本次：{in_tokens} in + {out_tokens} out ≈ ${cost}｜今日 {pct}%（{used_k}k / {cap_k}k）",
     "FOOTER_MODE": "⚙️模式：{mode_label}｜切換：〔免費〕〔便宜〕〔嚴謹〕",
     "FOOTER_MODE_ONLY": "⚙️模式：{mode_label}｜切換：〔免費〕〔便宜〕〔嚴謹〕",
     "FOOTER_UPGRADE_HINT": "💡 免費額度剩餘不多，可切換〔嚴謹〕模式獲得更精確回答",
@@ -442,6 +442,19 @@ MODE_LABELS: dict[str, str] = {
     "rigorous": "嚴謹",
 }
 
+# 每模式的 input/output 每百萬 token 單價（USD）
+MODE_PRICING: dict[str, tuple[float, float]] = {
+    "free": (0.0, 0.0),
+    "cheap": (3.0, 15.0),       # claude-sonnet-4-5: $3/$15 per MTok
+    "rigorous": (5.0, 25.0),    # claude-opus-4-5: $5/$25 per MTok
+}
+
+
+def calculate_cost(mode: str, in_tokens: int, out_tokens: int) -> float:
+    """計算本次請求的費用（USD）。"""
+    input_price, output_price = MODE_PRICING.get(mode, (0.0, 0.0))
+    return (in_tokens * input_price + out_tokens * output_price) / 1_000_000
+
 
 def format_usage_footer(
     daily_used: int,
@@ -449,7 +462,6 @@ def format_usage_footer(
     in_tokens: int,
     out_tokens: int,
     mode: str,
-    estimated_cost: float | None = None,
 ) -> str:
     """組裝 API 使用度 footer。
 
@@ -459,13 +471,15 @@ def format_usage_footer(
         in_tokens: 本次 input tokens
         out_tokens: 本次 output tokens
         mode: 目前模式
-        estimated_cost: 嚴謹模式成本估算 (可選)
 
     Returns:
         Footer 文字（2~4 行）
     """
     mode_label = MODE_LABELS.get(mode, mode)
     lines: list[str] = []
+
+    cost = calculate_cost(mode, in_tokens, out_tokens)
+    cost_str = f"{cost:.4f}" if cost > 0 else "0"
 
     if daily_cap > 0:
         pct = min(int(daily_used / daily_cap * 100), 100)
@@ -478,6 +492,7 @@ def format_usage_footer(
             cap_k=cap_k,
             in_tokens=in_tokens,
             out_tokens=out_tokens,
+            cost=cost_str,
         ))
     else:
         lines.append(Messages.format(
@@ -487,6 +502,7 @@ def format_usage_footer(
             cap_k="0",
             in_tokens=in_tokens,
             out_tokens=out_tokens,
+            cost=cost_str,
         ))
 
     lines.append(Messages.format("FOOTER_MODE", mode_label=mode_label))
@@ -499,10 +515,6 @@ def format_usage_footer(
     # 額度用盡警告
     if daily_cap > 0 and daily_used >= daily_cap:
         lines.append(_MESSAGES_ZH_TW["FOOTER_CAP_WARNING"])
-
-    # 成本估算
-    if estimated_cost is not None and estimated_cost > 0:
-        lines.append(Messages.format("FOOTER_COST_ESTIMATE", cost=estimated_cost))
 
     return "\n".join(lines)
 
