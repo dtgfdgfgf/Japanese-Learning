@@ -15,10 +15,13 @@ from linebot.v3.messaging import (
     ApiClient,
     Configuration,
     MessagingApi,
+    PostbackAction,
+    QuickReply,
+    QuickReplyItem,
     ReplyMessageRequest,
     TextMessage,
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, PostbackEvent, TextMessageContent
 
 from src.config import settings
 
@@ -185,6 +188,39 @@ class LineClient:
             return event.source.user_id
         return None
 
+    async def reply_with_quick_reply(
+        self,
+        reply_token: str,
+        text: str,
+        quick_reply: QuickReply,
+    ) -> bool:
+        """送出附帶 Quick Reply 的文字訊息。
+
+        Args:
+            reply_token: Reply token from webhook event
+            text: 訊息文字
+            quick_reply: Quick Reply 物件
+
+        Returns:
+            True if sent successfully
+        """
+        try:
+            with ApiClient(self.configuration) as api_client:
+                api = MessagingApi(api_client)
+                api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=reply_token,
+                        messages=[
+                            TextMessage(text=text, quick_reply=quick_reply),
+                        ],
+                    )
+                )
+            logger.debug(f"Sent reply with quick_reply: {text[:50]}...")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send LINE reply with quick_reply: {e}")
+            return False
+
     def get_reply_token(self, event: MessageEvent) -> str | None:
         """Extract reply token from a message event.
 
@@ -195,6 +231,43 @@ class LineClient:
             Reply token if available, None otherwise
         """
         return event.reply_token
+
+
+# ============================================================================
+# Quick Reply 輔助函數
+# ============================================================================
+
+_MODE_QUICK_REPLY_CONFIG: list[tuple[str, str]] = [
+    ("cheap", "省錢"),
+    ("balanced", "推薦"),
+    ("rigorous", "嚴謹"),
+]
+
+
+def build_mode_quick_replies(current_mode: str) -> QuickReply:
+    """建構模式切換 Quick Reply 按鈕。
+
+    當前模式加 ✓ 標記。使用 PostbackAction 避免與一般文字混淆。
+
+    Args:
+        current_mode: 目前的 LLM 模式 (cheap/balanced/rigorous)
+
+    Returns:
+        QuickReply 物件
+    """
+    items: list[QuickReplyItem] = []
+    for mode_key, label in _MODE_QUICK_REPLY_CONFIG:
+        display = f"✓{label}" if mode_key == current_mode else label
+        items.append(
+            QuickReplyItem(
+                action=PostbackAction(
+                    label=display,
+                    data=f"action=switch_mode&mode={mode_key}",
+                    display_text=f"{label}模式",
+                ),
+            )
+        )
+    return QuickReply(items=items)
 
 
 # Global client instance

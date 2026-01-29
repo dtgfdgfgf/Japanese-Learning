@@ -139,6 +139,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 • 練習 - 開始練習題
 • 查詢 <關鍵字> - 搜尋已入庫的內容
 • 用量 - 查看 API 使用量與費用
+• 省錢模式/推薦模式/嚴謹模式 - 切換 LLM 模式
 • 刪除最後一筆 - 刪除最近一筆入庫
 • 清空資料 - 刪除所有資料（需二次確認）
 • 隱私 - 查看資料保存說明
@@ -176,6 +177,15 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "COST_ALLTIME_SECTION": "\n\n📈 累計",
     "COST_MODEL_LINE": "\n• {model}: ${cost:.4f}",
     "COST_TOTAL_LINE": "\n💰 總計：${total:.4f}",
+
+    # ========== Footer / 模式相關 ==========
+    "FOOTER_USAGE": "📊API使用度：今日 {pct}%（{used_k}k / {cap_k}k tokens）｜本次 {in_tokens} in + {out_tokens} out",
+    "FOOTER_MODE": "⚙️模式：{mode_label}｜切換：〔省錢〕〔推薦〕〔嚴謹〕",
+    "FOOTER_MODE_ONLY": "⚙️模式：{mode_label}｜切換：〔省錢〕〔推薦〕〔嚴謹〕",
+    "FOOTER_UPGRADE_HINT": "💡 免費額度剩餘不多，可切換〔嚴謹〕模式獲得更精確回答",
+    "FOOTER_COST_ESTIMATE": "💳若改用嚴謹模式：本次約 ${cost:.4f}",
+    "FOOTER_CAP_WARNING": "⚠️ 今日免費額度已用完，仍可繼續使用",
+    "MODE_SWITCH_CONFIRM": "已切換為 {mode_label}",
 }
 
 
@@ -420,6 +430,87 @@ def format_delete_last_success(count: int) -> str:
 def format_delete_clear_success(raws: int, docs: int, items: int) -> str:
     """格式化清空資料成功訊息。"""
     return Messages.format("DELETE_CLEAR_SUCCESS", raws=raws, docs=docs, items=items)
+
+
+# ============================================================================
+# 模式標籤
+# ============================================================================
+
+MODE_LABELS: dict[str, str] = {
+    "cheap": "省錢(免費)",
+    "balanced": "推薦(免費)",
+    "rigorous": "嚴謹(付費)",
+}
+
+
+def format_usage_footer(
+    daily_used: int,
+    daily_cap: int,
+    in_tokens: int,
+    out_tokens: int,
+    mode: str,
+    estimated_cost: float | None = None,
+) -> str:
+    """組裝 API 使用度 footer。
+
+    Args:
+        daily_used: 今日已使用 token
+        daily_cap: 每日 token 上限
+        in_tokens: 本次 input tokens
+        out_tokens: 本次 output tokens
+        mode: 目前模式
+        estimated_cost: 嚴謹模式成本估算 (可選)
+
+    Returns:
+        Footer 文字（2~4 行）
+    """
+    mode_label = MODE_LABELS.get(mode, mode)
+    lines: list[str] = []
+
+    if daily_cap > 0:
+        pct = min(int(daily_used / daily_cap * 100), 100)
+        used_k = f"{daily_used / 1000:.1f}"
+        cap_k = f"{daily_cap / 1000:.0f}"
+        lines.append(Messages.format(
+            "FOOTER_USAGE",
+            pct=pct,
+            used_k=used_k,
+            cap_k=cap_k,
+            in_tokens=in_tokens,
+            out_tokens=out_tokens,
+        ))
+    else:
+        lines.append(Messages.format(
+            "FOOTER_USAGE",
+            pct=0,
+            used_k="0",
+            cap_k="0",
+            in_tokens=in_tokens,
+            out_tokens=out_tokens,
+        ))
+
+    lines.append(Messages.format("FOOTER_MODE", mode_label=mode_label))
+
+    # 升級提示：剩餘 < 15%
+    if daily_cap > 0 and (daily_cap - daily_used) < daily_cap * 0.15:
+        if mode != "rigorous":
+            lines.append(_MESSAGES_ZH_TW["FOOTER_UPGRADE_HINT"])
+
+    # 額度用盡警告
+    if daily_cap > 0 and daily_used >= daily_cap:
+        lines.append(_MESSAGES_ZH_TW["FOOTER_CAP_WARNING"])
+
+    # 成本估算
+    if estimated_cost is not None and estimated_cost > 0:
+        lines.append(Messages.format("FOOTER_COST_ESTIMATE", cost=estimated_cost))
+
+    return "\n".join(lines)
+
+
+def format_mode_switch_confirm(mode: str) -> str:
+    """格式化模式切換確認訊息。"""
+    mode_label = MODE_LABELS.get(mode, mode)
+    return Messages.format("MODE_SWITCH_CONFIRM", mode_label=mode_label)
 
 
 def format_cost_summary(

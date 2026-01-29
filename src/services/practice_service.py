@@ -47,14 +47,16 @@ MIN_ITEMS_FOR_PRACTICE = 5
 class PracticeService:
     """Service for managing practice sessions and questions."""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, mode: str = "balanced"):
         """
         Initialize PracticeService.
-        
+
         Args:
             session: Database session
+            mode: LLM mode（預留供未來 LLM 題目生成使用）
         """
         self.session = session
+        self.mode = mode
         self.item_repo = ItemRepository(session)
         self.practice_log_repo = PracticeLogRepository(session)
 

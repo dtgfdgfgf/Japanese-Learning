@@ -29,6 +29,12 @@ PRICING: dict[str, dict[str, dict[str, float]]] = {
         # 預設定價 (未知模型使用)
         "default": {"input": 0.15, "output": 0.60},
     },
+    "google": {
+        "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
+        "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
+        # 預設定價
+        "default": {"input": 0.15, "output": 0.60},
+    },
 }
 
 

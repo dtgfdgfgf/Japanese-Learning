@@ -186,28 +186,33 @@ class TestExtractorService:
         
         # Mock LLM response
         mock_llm = MagicMock()
-        mock_llm.complete_json = AsyncMock(return_value={
-            "items": [
-                {
-                    "item_type": "vocab",
-                    "key": "vocab:考える",
-                    "surface": "考える",
-                    "reading": "かんがえる",
-                    "pos": "verb",
-                    "glossary_zh": ["思考", "考慮"],
-                    "confidence": 1.0,
-                },
-                {
-                    "item_type": "vocab",
-                    "key": "vocab:食べる",
-                    "surface": "食べる",
-                    "reading": "たべる",
-                    "pos": "verb",
-                    "glossary_zh": ["吃"],
-                    "confidence": 1.0,
-                },
-            ]
-        })
+        mock_trace = MagicMock()
+        mock_trace.to_dict = MagicMock(return_value={})
+        mock_llm.complete_json_with_mode = AsyncMock(return_value=(
+            {
+                "items": [
+                    {
+                        "item_type": "vocab",
+                        "key": "vocab:考える",
+                        "surface": "考える",
+                        "reading": "かんがえる",
+                        "pos": "verb",
+                        "glossary_zh": ["思考", "考慮"],
+                        "confidence": 1.0,
+                    },
+                    {
+                        "item_type": "vocab",
+                        "key": "vocab:食べる",
+                        "surface": "食べる",
+                        "reading": "たべる",
+                        "pos": "verb",
+                        "glossary_zh": ["吃"],
+                        "confidence": 1.0,
+                    },
+                ]
+            },
+            mock_trace,
+        ))
         
         # Mock repositories
         with patch.object(ExtractorService, "__init__", lambda self, session, llm_client=None: None):
@@ -233,6 +238,9 @@ class TestExtractorService:
             
             service.item_repo = MagicMock()
             service.item_repo.upsert = AsyncMock(return_value=MagicMock())
+
+            service.usage_repo = MagicMock()
+            service.usage_repo.create_log = AsyncMock()
             
             # Execute
             result = await service.extract("doc123", "user123")
@@ -240,7 +248,7 @@ class TestExtractorService:
             # Verify
             assert result.vocab_count == 2
             assert result.grammar_count == 0
-            mock_llm.complete_json.assert_called_once()
+            mock_llm.complete_json_with_mode.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_extract_already_parsed(self, async_db_session):

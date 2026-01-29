@@ -8,10 +8,12 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
+import google.generativeai as genai
 import openai
 
 from src.config import settings
@@ -58,6 +60,50 @@ class LLMTrace:
         }
 
 
+@dataclass
+class UsageContext:
+    """請求級別的 token 累計器（透過 contextvars 傳遞）。"""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    def add(self, inp: int, out: int) -> None:
+        self.input_tokens += inp
+        self.output_tokens += out
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+# 請求級別 context var，由 webhook handler 建立與讀取
+usage_context_var: ContextVar[UsageContext | None] = ContextVar(
+    "usage_context", default=None
+)
+
+
+# 模式 → provider / model 映射
+MODE_MODEL_MAP: dict[str, dict[str, str]] = {
+    "cheap": {"provider": "openai", "model": "gpt-4o-mini"},
+    "balanced": {"provider": "google", "model": "gemini-2.5-flash"},
+    "rigorous": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
+}
+
+# 模式 fallback 順序（失敗時依序嘗試）
+_MODE_FALLBACK: dict[str, list[str]] = {
+    "cheap": ["google", "anthropic"],
+    "balanced": ["openai", "anthropic"],
+    "rigorous": ["openai", "google"],
+}
+
+
+def _accumulate_usage(inp: int, out: int) -> None:
+    """將 token 使用量累加到當前請求的 UsageContext。"""
+    ctx = usage_context_var.get()
+    if ctx is not None:
+        ctx.add(inp, out)
+
+
 class LLMClient:
     """LLM client with Anthropic primary and OpenAI fallback.
 
@@ -94,6 +140,13 @@ class LLMClient:
         )
         self.timeout = timeout_seconds or settings.llm_timeout_seconds
 
+        # Gemini client 初始化（key 為空時跳過）
+        if settings.gemini_api_key:
+            genai.configure(api_key=settings.gemini_api_key)
+            self._gemini_configured = True
+        else:
+            self._gemini_configured = False
+
     async def complete(
         self,
         system_prompt: str,
@@ -129,7 +182,7 @@ class LLMClient:
             )
             latency_ms = int((time.time() - start_time) * 1000)
 
-            return LLMResponse(
+            resp = LLMResponse(
                 content=response["content"],
                 model=self.ANTHROPIC_MODEL,
                 provider="anthropic",
@@ -138,6 +191,8 @@ class LLMClient:
                 latency_ms=latency_ms,
                 is_fallback=False,
             )
+            _accumulate_usage(resp.input_tokens, resp.output_tokens)
+            return resp
 
         except TimeoutError:
             logger.warning(
@@ -159,7 +214,7 @@ class LLMClient:
             )
             latency_ms = int((time.time() - start_time) * 1000)
 
-            return LLMResponse(
+            resp = LLMResponse(
                 content=response["content"],
                 model=self.OPENAI_MODEL,
                 provider="openai",
@@ -168,6 +223,8 @@ class LLMClient:
                 latency_ms=latency_ms,
                 is_fallback=True,
             )
+            _accumulate_usage(resp.input_tokens, resp.output_tokens)
+            return resp
 
         except Exception as e:
             logger.error(f"OpenAI fallback also failed: {e}")
@@ -237,6 +294,211 @@ class LLMClient:
             "input_tokens": response.usage.prompt_tokens if response.usage else 0,
             "output_tokens": response.usage.completion_tokens if response.usage else 0,
         }
+
+    async def _call_google(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int,
+        temperature: float,
+        model: str = "gemini-2.5-flash",
+    ) -> dict[str, Any]:
+        """Call Google Gemini API (同步包裝為 async)。
+
+        Returns:
+            Dict with content, input_tokens, output_tokens
+        """
+        if not self._gemini_configured:
+            raise RuntimeError("Gemini API key not configured")
+        def _sync_call() -> dict[str, Any]:
+            client = genai.GenerativeModel(
+                model_name=model,
+                system_instruction=system_prompt,
+                generation_config=genai.GenerationConfig(
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+            )
+            response = client.generate_content(user_message)
+            # token 使用量
+            usage = response.usage_metadata
+            return {
+                "content": response.text or "",
+                "input_tokens": usage.prompt_token_count if usage else 0,
+                "output_tokens": usage.candidates_token_count if usage else 0,
+            }
+
+        return await asyncio.to_thread(_sync_call)
+
+    async def complete_with_mode(
+        self,
+        mode: str,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.7,
+        json_mode: bool = False,
+    ) -> LLMResponse:
+        """根據模式選擇 provider/model 完成 LLM 呼叫，失敗時 fallback。
+
+        Args:
+            mode: cheap / balanced / rigorous
+            system_prompt: System 指令
+            user_message: 使用者輸入
+            max_tokens: 最大 token 數
+            temperature: 取樣溫度
+            json_mode: 是否要求 JSON 輸出
+
+        Returns:
+            LLMResponse
+        """
+        mapping = MODE_MODEL_MAP.get(mode, MODE_MODEL_MAP["balanced"])
+        provider = mapping["provider"]
+        model = mapping["model"]
+
+        start_time = time.time()
+        last_error: Exception | None = None
+
+        # 嘗試主要 provider
+        try:
+            response = await self._call_provider(
+                provider=provider,
+                model=model,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                json_mode=json_mode,
+            )
+            latency_ms = int((time.time() - start_time) * 1000)
+            resp = LLMResponse(
+                content=response["content"],
+                model=model,
+                provider=provider,
+                input_tokens=response["input_tokens"],
+                output_tokens=response["output_tokens"],
+                latency_ms=latency_ms,
+                is_fallback=False,
+            )
+            _accumulate_usage(resp.input_tokens, resp.output_tokens)
+            return resp
+        except Exception as e:
+            logger.warning(f"{provider}/{model} failed: {e}, trying fallback")
+            last_error = e
+
+        # Fallback：依序嘗試備援 provider
+        fallback_providers = _MODE_FALLBACK.get(mode, ["openai"])
+        for fb_provider in fallback_providers:
+            fb_mapping = next(
+                (v for v in MODE_MODEL_MAP.values() if v["provider"] == fb_provider),
+                None,
+            )
+            if fb_mapping is None:
+                continue
+            fb_model = fb_mapping["model"]
+            try:
+                response = await self._call_provider(
+                    provider=fb_provider,
+                    model=fb_model,
+                    system_prompt=system_prompt,
+                    user_message=user_message,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    json_mode=json_mode,
+                )
+                latency_ms = int((time.time() - start_time) * 1000)
+                resp = LLMResponse(
+                    content=response["content"],
+                    model=fb_model,
+                    provider=fb_provider,
+                    input_tokens=response["input_tokens"],
+                    output_tokens=response["output_tokens"],
+                    latency_ms=latency_ms,
+                    is_fallback=True,
+                )
+                _accumulate_usage(resp.input_tokens, resp.output_tokens)
+                return resp
+            except Exception as e:
+                logger.warning(f"Fallback {fb_provider}/{fb_model} failed: {e}")
+                last_error = e
+
+        raise last_error or RuntimeError("All LLM providers failed")
+
+    async def _call_provider(
+        self,
+        provider: str,
+        model: str,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int,
+        temperature: float,
+        json_mode: bool = False,
+    ) -> dict[str, Any]:
+        """統一的 provider 呼叫分派。"""
+        if provider == "anthropic":
+            return await self._call_anthropic(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        elif provider == "openai":
+            return await self._call_openai(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                json_mode=json_mode,
+            )
+        elif provider == "google":
+            return await self._call_google(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                model=model,
+            )
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
+
+    async def complete_json_with_mode(
+        self,
+        mode: str,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.3,
+    ) -> tuple[dict[str, Any], LLMTrace]:
+        """根據模式完成 JSON 回應，與 complete_json 相同解析邏輯。"""
+        response = await self.complete_with_mode(
+            mode=mode,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            json_mode=True,
+        )
+
+        content = response.content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+
+        parsed = json.loads(content.strip())
+
+        trace = LLMTrace(
+            model=response.model,
+            provider=response.provider,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            latency_ms=response.latency_ms,
+            is_fallback=response.is_fallback,
+        )
+
+        return parsed, trace
 
     async def complete_json(
         self,

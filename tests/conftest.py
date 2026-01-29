@@ -24,6 +24,7 @@ os.environ["ANTHROPIC_API_KEY"] = "test_anthropic_key"
 os.environ["OPENAI_API_KEY"] = "sk-test_openai_key_for_testing"
 os.environ["USER_ID_SALT"] = "test_salt_for_user_id_hashing_must_be_at_least_32_chars_long"
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@localhost:5432/test_db"
+os.environ["GEMINI_API_KEY"] = "test_gemini_key"
 
 
 # Now import app modules after env vars are set
@@ -132,8 +133,15 @@ def mock_line_client_factory():
 def mock_llm_client() -> MagicMock:
     """Create a mock LLM client."""
     client = MagicMock()
+    mock_trace = MagicMock()
+    mock_trace.to_dict = MagicMock(return_value={})
     client.complete = AsyncMock(return_value="test response")
-    client.complete_json = AsyncMock(return_value={"items": []})
+    client.complete_json = AsyncMock(return_value=({"items": []}, mock_trace))
+    client.complete_with_mode = AsyncMock(return_value=MagicMock(
+        content="test response", model="test", provider="openai",
+        input_tokens=10, output_tokens=20, latency_ms=100, is_fallback=False,
+    ))
+    client.complete_json_with_mode = AsyncMock(return_value=({"items": []}, mock_trace))
     return client
 
 

@@ -56,6 +56,7 @@ class ExtractorService:
         self,
         doc_id: str,
         user_id: str,
+        mode: str = "balanced",
     ) -> ExtractorResponse:
         """
         Extract vocabulary and grammar items from a document.
@@ -107,7 +108,7 @@ class ExtractorService:
 
         # Call LLM for extraction
         try:
-            items, llm_trace = await self._call_llm_extraction(raw_text, max_items)
+            items, llm_trace = await self._call_llm_extraction(raw_text, max_items, mode)
             # 記錄 API 用量
             if llm_trace:
                 await self.usage_repo.create_log(
@@ -162,23 +163,25 @@ class ExtractorService:
         self,
         raw_text: str,
         max_items: int,
+        mode: str = "balanced",
     ) -> tuple[list[ExtractedItem], LLMTrace]:
         """
         Call LLM to extract items from text.
-        
+
         Args:
             raw_text: Text to analyze
             max_items: Maximum items to extract
-            
+            mode: LLM mode (cheap/balanced/rigorous)
+
         Returns:
             Tuple of (list of ExtractedItem objects, LLMTrace)
         """
         system_prompt = get_system_prompt(max_items)
         user_message = format_extractor_request(raw_text, max_items)
 
-        # Call LLM with JSON mode
-        # complete_json 返回 (parsed_dict, LLMTrace)
-        response_data, llm_trace = await self.llm_client.complete_json(
+        # 使用 mode-aware JSON 完成
+        response_data, llm_trace = await self.llm_client.complete_json_with_mode(
+            mode=mode,
             system_prompt=system_prompt,
             user_message=user_message,
         )

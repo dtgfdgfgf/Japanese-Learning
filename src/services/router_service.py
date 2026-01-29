@@ -33,26 +33,27 @@ class RouterService:
         self,
         message: str,
         context: Optional[str] = None,
+        mode: str = "balanced",
     ) -> RouterResponse:
         """Classify user message intent.
-        
+
         Args:
             message: User's message
             context: Optional conversation context
-            
+            mode: LLM mode (cheap/balanced/rigorous)
+
         Returns:
             RouterResponse with classified intent
         """
         try:
-            # Format request
             user_prompt = format_router_request(message, context)
             system_prompt = get_system_prompt()
-            
-            # Call LLM
-            response = await self.llm_client.complete(
+
+            response = await self.llm_client.complete_with_mode(
+                mode=mode,
                 system_prompt=system_prompt,
                 user_message=user_prompt,
-                temperature=0.3,  # Lower temperature for more consistent classification
+                temperature=0.3,
                 max_tokens=500,
             )
             response_text = response.content
@@ -173,13 +174,15 @@ class RouterService:
         self,
         message: str,
         context: Optional[str] = None,
+        mode: str = "balanced",
     ) -> str:
         """Generate a chat response for learning questions.
-        
+
         Args:
             message: User's question
             context: Optional conversation context
-            
+            mode: LLM mode (cheap/balanced/rigorous)
+
         Returns:
             Generated response
         """
@@ -192,9 +195,10 @@ class RouterService:
 - 簡潔明瞭
 - 舉例說明
 - 鼓勵學習"""
-        
+
         try:
-            response = await self.llm_client.complete(
+            response = await self.llm_client.complete_with_mode(
+                mode=mode,
                 system_prompt=system_prompt,
                 user_message=message,
                 temperature=0.7,

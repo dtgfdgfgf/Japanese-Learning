@@ -52,7 +52,7 @@ class TestRouterService:
             "reason": "Contains Japanese learning content"
         })
         
-        router_service.llm_client.complete = AsyncMock(
+        router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
         
@@ -70,7 +70,7 @@ class TestRouterService:
             "reason": "User wants to practice"
         })
         
-        router_service.llm_client.complete = AsyncMock(
+        router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
         
@@ -89,7 +89,7 @@ class TestRouterService:
             "reason": "User searching for a word"
         })
         
-        router_service.llm_client.complete = AsyncMock(
+        router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
         
@@ -107,7 +107,7 @@ class TestRouterService:
             "reason": "User asking a learning question"
         })
         
-        router_service.llm_client.complete = AsyncMock(
+        router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
         
@@ -124,7 +124,7 @@ class TestRouterService:
             "reason": "Cannot determine intent"
         })
         
-        router_service.llm_client.complete = AsyncMock(
+        router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
         
@@ -135,7 +135,7 @@ class TestRouterService:
     @pytest.mark.asyncio
     async def test_llm_error_returns_unknown(self, router_service):
         """Test that LLM errors return unknown intent."""
-        router_service.llm_client.complete = AsyncMock(
+        router_service.llm_client.complete_with_mode = AsyncMock(
             side_effect=Exception("LLM Error")
         )
         
@@ -147,7 +147,7 @@ class TestRouterService:
     @pytest.mark.asyncio
     async def test_invalid_json_uses_heuristic(self, router_service):
         """Test that invalid JSON response uses heuristic fallback."""
-        router_service.llm_client.complete = AsyncMock(
+        router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock("This is not JSON")
         )
         
@@ -232,7 +232,7 @@ class TestChatResponse:
         """Test that chat responses are generated."""
         service = RouterService()
         service.llm_client = MagicMock()
-        service.llm_client.complete = AsyncMock(
+        service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock("這個文法表示完成或遺憾的語氣。")
         )
         
@@ -246,7 +246,7 @@ class TestChatResponse:
         """Test chat response error handling."""
         service = RouterService()
         service.llm_client = MagicMock()
-        service.llm_client.complete = AsyncMock(side_effect=Exception("Error"))
+        service.llm_client.complete_with_mode = AsyncMock(side_effect=Exception("Error"))
         
         response = await service.get_chat_response("test")
         

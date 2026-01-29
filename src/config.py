@@ -53,6 +53,17 @@ class Settings(BaseSettings):
         description="Salt for hashing user IDs (minimum 32 characters)",
     )
 
+    # Gemini
+    gemini_api_key: str = Field(default="", description="Google Gemini API Key（留空則停用 Gemini provider）")
+
+    # LLM Mode
+    default_llm_mode: str = Field(
+        default="balanced", description="Default LLM mode: cheap/balanced/rigorous"
+    )
+    daily_cap_tokens_free: int = Field(
+        default=50000, ge=0, description="Daily free token cap per user"
+    )
+
     # Rate Limiting
     llm_rate_limit_per_minute: int = Field(
         default=10, ge=1, le=100, description="LLM calls per minute per user"

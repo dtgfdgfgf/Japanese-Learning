@@ -6,6 +6,7 @@ from src.repositories.document_repo import DocumentRepository
 from src.repositories.item_repo import ItemRepository
 from src.repositories.practice_log_repo import PracticeLogRepository
 from src.repositories.raw_message_repo import RawMessageRepository
+from src.repositories.user_profile_repo import UserProfileRepository
 
 __all__ = [
     "ApiUsageLogRepository",
@@ -14,4 +15,5 @@ __all__ = [
     "ItemRepository",
     "PracticeLogRepository",
     "RawMessageRepository",
+    "UserProfileRepository",
 ]
