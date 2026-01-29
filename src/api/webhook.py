@@ -287,7 +287,9 @@ async def _dispatch_command(
     command_type = command.command_type
 
     if command_type == CommandType.HELP:
-        return Messages.HELP
+        from src.templates.messages import MODE_LABELS
+        mode_label = MODE_LABELS.get(mode, mode)
+        return f"{Messages.HELP}\n\n⚙️ 目前模式：{mode_label}"
 
     if command_type == CommandType.PRIVACY:
         return Messages.PRIVACY
