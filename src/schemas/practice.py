@@ -5,11 +5,20 @@ T045: Create Pydantic schemas for Practice
 DoD: PracticeQuestion, PracticeSession schemas 定義完整；支援 vocab_recall/grammar_cloze
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    # 避免循環引用
+    pass
+
+
+def _utc_now() -> datetime:
+    """取得當前 UTC 時間（timezone-aware）。"""
+    return datetime.now(timezone.utc)
 
 
 class PracticeType(str, Enum):
@@ -76,7 +85,7 @@ class PracticeSession(BaseModel):
         description="User's answers with results"
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=_utc_now,
         description="When session was created"
     )
     is_complete: bool = Field(default=False, description="Whether all questions answered")
@@ -109,11 +118,14 @@ class PracticeSession(BaseModel):
         Returns:
             Formatted string with all questions
         """
-        lines = ["📝 今日練習題：\n"]
+        # 延遲引入以避免循環引用
+        from src.templates.messages import Messages
+        
+        lines = [Messages.PRACTICE_HEADER]
         for i, q in enumerate(self.questions, 1):
             lines.append(q.format_for_display(i))
-        lines.append("\n請依序回答，輸入答案即可 ✍️")
-        return "\n".join(lines)
+        lines.append(Messages.PRACTICE_FOOTER)
+        return "".join(lines)
     
     def format_result_message(self) -> str:
         """Format practice results as LINE message.
@@ -121,23 +133,10 @@ class PracticeSession(BaseModel):
         Returns:
             Formatted string with results
         """
-        correct = self.correct_count
-        total = self.total_questions
+        # 延遲引入以避免循環引用
+        from src.templates.messages import format_practice_result
         
-        if correct == total:
-            emoji = "🎉"
-            message = "太棒了！全部答對！"
-        elif correct >= total * 0.8:
-            emoji = "👍"
-            message = "做得很好！"
-        elif correct >= total * 0.5:
-            emoji = "💪"
-            message = "繼續加油！"
-        else:
-            emoji = "📚"
-            message = "多複習一下吧！"
-        
-        return f"{emoji} 練習結束！\n得分：{correct}/{total}\n{message}"
+        return format_practice_result(self.correct_count, self.total_questions)
 
 
 class PracticeAnswer(BaseModel):
@@ -155,10 +154,13 @@ class PracticeAnswer(BaseModel):
         Returns:
             Formatted feedback string
         """
+        # 延遲引入以避免循環引用
+        from src.templates.messages import Messages, format_practice_answer_wrong
+        
         if self.is_correct:
-            return "✅ 正確！"
+            return Messages.PRACTICE_ANSWER_CORRECT
         else:
-            return f"❌ 答案是：{self.expected_answer}"
+            return format_practice_answer_wrong(self.expected_answer)
 
 
 class ItemSelectionCriteria(BaseModel):

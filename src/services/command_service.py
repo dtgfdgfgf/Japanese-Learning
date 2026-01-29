@@ -15,6 +15,7 @@ from src.lib.security import hash_user_id
 from src.repositories.document_repo import DocumentRepository
 from src.repositories.raw_message_repo import RawMessageRepository
 from src.schemas.command import CommandResult, CommandType, ParsedCommand
+from src.templates.messages import Messages, format_save_success
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     (r"^確定清空資料$", CommandType.DELETE_CONFIRM, False),
     (r"^隱私$", CommandType.PRIVACY, False),
     (r"^(說明|幫助|help)$", CommandType.HELP, False),
+    (r"^(用量|cost)$", CommandType.COST, False),
 ]
 
 
@@ -128,12 +130,12 @@ class CommandService:
             )
 
             # Format short doc_id for display
-            short_id = document.doc_id[:8]
+            short_id = str(document.doc_id)[:8]
 
             logger.info(f"Saved raw message and document: {document.doc_id}")
 
             return CommandResult.ok(
-                message=f"已入庫：#{short_id}",
+                message=format_save_success(short_id),
                 doc_id=document.doc_id,
                 raw_id=raw_message.raw_id,
             )
@@ -141,7 +143,7 @@ class CommandService:
         except Exception as e:
             logger.exception(f"Failed to save raw: {e}")
             return CommandResult.error(
-                message="入庫失敗，請稍後再試",
+                message=Messages.ERROR_SAVE,
                 error=str(e),
             )
 
@@ -170,53 +172,39 @@ class CommandService:
         return None
 
 
-# Helper functions for common responses
+# ============================================================================
+# 向後相容的 helper 函數 (re-export from Messages)
+# 建議新程式碼直接使用 src.templates.messages.Messages
+# ============================================================================
+
+
 def get_help_message() -> str:
-    """Get help message with available commands."""
-    return """📖 可用指令：
-
-• 入庫 - 儲存上一則訊息的日文內容
-• 分析 - 分析已入庫的內容，抽取單字/文法
-• 練習 - 開始練習題
-• 查詢 <關鍵字> - 搜尋已入庫的內容
-• 刪除最後一筆 - 刪除最近一筆入庫
-• 清空資料 - 刪除所有資料（需二次確認）
-• 隱私 - 查看資料保存說明
-
-💡 使用方式：
-1. 貼上日文內容
-2. 輸入「入庫」
-3. 輸入「分析」
-4. 輸入「練習」開始複習！"""
+    """Get help message with available commands.
+    
+    Deprecated: 建議使用 Messages.HELP
+    """
+    return Messages.HELP
 
 
 def get_privacy_message() -> str:
-    """Get privacy policy message."""
-    return """🔒 隱私說明
-
-📦 資料保存：
-• 您的 LINE ID 經過雜湊處理，無法還原
-• 僅保存您主動入庫的文字內容
-• 資料儲存於加密的雲端資料庫
-
-🤖 AI 使用：
-• 使用 AI 分析日文內容（單字、文法抽取）
-• 使用 AI 生成練習題目
-• AI 不會記憶您的對話內容
-
-🗑️ 資料刪除：
-• 輸入「刪除最後一筆」刪除最近一筆
-• 輸入「清空資料」刪除所有資料
-• 刪除後資料無法恢復
-
-如有疑問，請聯繫開發者。"""
+    """Get privacy policy message.
+    
+    Deprecated: 建議使用 Messages.PRIVACY
+    """
+    return Messages.PRIVACY
 
 
 def get_no_content_message() -> str:
-    """Get message when no content to save."""
-    return "請先貼上要入庫的內容，再輸入「入庫」"
+    """Get message when no content to save.
+    
+    Deprecated: 建議使用 Messages.SAVE_NO_CONTENT
+    """
+    return Messages.SAVE_NO_CONTENT
 
 
 def get_search_hint_message() -> str:
-    """Get message when search keyword is missing."""
-    return "請提供查詢關鍵字，例如：查詢 考える"
+    """Get message when search keyword is missing.
+    
+    Deprecated: 建議使用 Messages.SEARCH_HINT
+    """
+    return Messages.SEARCH_HINT

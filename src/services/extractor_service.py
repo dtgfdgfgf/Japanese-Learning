@@ -5,24 +5,22 @@ T037: Implement ExtractorService
 DoD: extract(doc_id) 回傳 ExtractorResponse；長文 (>2000 字) 限制 max_items=20
 """
 
-import json
 import logging
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.lib.llm_client import LLMClient
+from src.lib.llm_client import LLMClient, LLMTrace
 from src.lib.normalizer import detect_language
 from src.prompts.extractor import format_extractor_request, get_system_prompt
+from src.repositories.api_usage_log_repo import ApiUsageLogRepository
 from src.repositories.document_repo import DocumentRepository
 from src.repositories.item_repo import ItemRepository
 from src.repositories.raw_message_repo import RawMessageRepository
 from src.schemas.extractor import (
     ExtractedItem,
-    ExtractorResponse,
     ExtractionSummary,
+    ExtractorResponse,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +32,11 @@ SHORT_TEXT_MAX_ITEMS = 10
 
 class ExtractorService:
     """Service for extracting vocabulary and grammar from Japanese text."""
-    
+
     def __init__(
         self,
         session: AsyncSession,
-        llm_client: Optional[LLMClient] = None,
+        llm_client: LLMClient | None = None,
     ):
         """
         Initialize ExtractorService.
@@ -52,7 +50,8 @@ class ExtractorService:
         self.raw_message_repo = RawMessageRepository(session)
         self.document_repo = DocumentRepository(session)
         self.item_repo = ItemRepository(session)
-    
+        self.usage_repo = ApiUsageLogRepository(session)
+
     async def extract(
         self,
         doc_id: str,
@@ -75,7 +74,7 @@ class ExtractorService:
         document = await self.document_repo.get_by_id(doc_id)
         if not document:
             raise ValueError(f"Document not found: {doc_id}")
-        
+
         if document.parse_status == "parsed":
             logger.warning(f"Document {doc_id} already parsed")
             return ExtractorResponse(
@@ -83,14 +82,14 @@ class ExtractorService:
                 items=[],
                 warnings=["Document already parsed"],
             )
-        
+
         # Get raw message text
         raw_message = await self.raw_message_repo.get_by_id(document.raw_id)
         if not raw_message:
             raise ValueError(f"Raw message not found for document: {doc_id}")
-        
+
         raw_text = raw_message.raw_text
-        
+
         # Detect language
         lang = detect_language(raw_text)
         if lang not in ("ja", "unknown"):
@@ -101,14 +100,21 @@ class ExtractorService:
                 items=[],
                 warnings=[f"Text doesn't appear to be Japanese (detected: {lang})"],
             )
-        
+
         # Determine max items based on text length
         text_length = len(raw_text)
         max_items = DEFAULT_MAX_ITEMS if text_length > LONG_TEXT_THRESHOLD else SHORT_TEXT_MAX_ITEMS
-        
+
         # Call LLM for extraction
         try:
-            items = await self._call_llm_extraction(raw_text, max_items)
+            items, llm_trace = await self._call_llm_extraction(raw_text, max_items)
+            # 記錄 API 用量
+            if llm_trace:
+                await self.usage_repo.create_log(
+                    user_id=user_id,
+                    trace=llm_trace,
+                    operation="extraction",
+                )
         except Exception as e:
             logger.error(f"LLM extraction failed for {doc_id}: {e}")
             await self._update_document_status(doc_id, "failed", lang)
@@ -117,7 +123,7 @@ class ExtractorService:
                 items=[],
                 warnings=[f"Extraction failed: {str(e)}"],
             )
-        
+
         # Save items to database
         saved_items = []
         for item in items:
@@ -135,28 +141,28 @@ class ExtractorService:
                 logger.debug(f"Saved item: {item.key}")
             except Exception as e:
                 logger.error(f"Failed to save item {item.key}: {e}")
-        
+
         # Update document status
         await self._update_document_status(doc_id, "parsed", lang)
-        
+
         # Build response
         response = ExtractorResponse.from_items(doc_id, saved_items)
-        
+
         if len(saved_items) < len(items):
             response.warnings.append(
                 f"Some items failed to save ({len(items) - len(saved_items)} failures)"
             )
-        
+
         if text_length > LONG_TEXT_THRESHOLD:
             response.warnings.append("Long text - extraction limited to 20 items")
-        
+
         return response
-    
+
     async def _call_llm_extraction(
         self,
         raw_text: str,
         max_items: int,
-    ) -> list[ExtractedItem]:
+    ) -> tuple[list[ExtractedItem], LLMTrace]:
         """
         Call LLM to extract items from text.
         
@@ -165,38 +171,41 @@ class ExtractorService:
             max_items: Maximum items to extract
             
         Returns:
-            List of ExtractedItem objects
+            Tuple of (list of ExtractedItem objects, LLMTrace)
         """
         system_prompt = get_system_prompt(max_items)
         user_message = format_extractor_request(raw_text, max_items)
-        
+
         # Call LLM with JSON mode
-        response = await self.llm_client.complete_json(
+        # complete_json 返回 (parsed_dict, LLMTrace)
+        response_data, llm_trace = await self.llm_client.complete_json(
             system_prompt=system_prompt,
             user_message=user_message,
         )
-        
+
+        # 記錄 LLM trace 供 debug 用
+        logger.debug(f"LLM extraction trace: {llm_trace.to_dict()}")
+
         # Parse response
         items = []
-        raw_items = response.get("items", [])
-        
+        raw_items = response_data.get("items", [])
+
         for raw_item in raw_items[:max_items]:
             try:
                 item = ExtractedItem(**raw_item)
                 items.append(item)
             except Exception as e:
                 logger.warning(f"Failed to parse item: {e}, data: {raw_item}")
-        
-        return items
-    
+
+        return items, llm_trace
+
     async def _update_document_status(
         self,
         doc_id: str,
         status: str,
         lang: str,
     ) -> None:
-        """
-        Update document parse status.
+        """更新文件解析狀態。
         
         Args:
             doc_id: Document ID
@@ -205,13 +214,11 @@ class ExtractorService:
         """
         await self.document_repo.update(
             doc_id,
-            {
-                "parse_status": status,
-                "lang": lang,
-                "parser_version": "v1.0.0",
-            },
+            parse_status=status,
+            lang=lang,
+            parser_version="v1.0.0",
         )
-    
+
     async def get_deferred_documents(
         self,
         user_id: str,

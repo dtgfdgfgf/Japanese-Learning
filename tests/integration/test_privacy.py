@@ -15,6 +15,7 @@ from httpx import AsyncClient, ASGITransport
 
 from src.main import app
 from src.services.command_service import get_privacy_message
+from tests.conftest import create_message_event
 
 
 class TestPrivacyCommandIntegration:
@@ -52,6 +53,10 @@ class TestPrivacyCommandIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            # 返回真正的 MessageEvent 物件，讓 isinstance 檢查通過
+            mock_client.parse_events.return_value = [
+                create_message_event(text="隱私", user_id=user_id, reply_token="token1")
+            ]
             mock_line.return_value = mock_client
             
             transport = ASGITransport(app=app)

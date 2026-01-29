@@ -22,6 +22,7 @@ class CommandType(str, Enum):
     DELETE_CONFIRM = "delete_confirm"  # 確定清空資料
     PRIVACY = "privacy"  # 隱私
     HELP = "help"  # 說明
+    COST = "cost"  # 用量
     UNKNOWN = "unknown"  # 未知指令
 
 

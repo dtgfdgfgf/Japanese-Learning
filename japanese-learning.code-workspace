@@ -50,6 +50,38 @@
       "/^Copy-Item \"C:\\\\Users\\\\user\\\\Workspace\\\\specs\\\\001-line-jp-learning\\\\plan\\.md\" \"C:\\\\Users\\\\user\\\\Workspace\\\\projects\\\\japanese-learning\\\\specs\\\\001-line-jp-learning\\\\plan\\.md\" -Force; Get-Content \"C:\\\\Users\\\\user\\\\Workspace\\\\specs\\\\001-line-jp-learning\\\\plan\\.md\" -Head 100$/": {
         "approve": true,
         "matchCommandLine": true
+      },
+      "/^git commit -m \"fix: add src/lib to git \\(was ignored by gitignore\\)\"; git push$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^ruff check src/lib/llm_client\\.py src/main\\.py src/models/document\\.py src/repositories/document_repo\\.py src/repositories/item_repo\\.py$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^python -m ruff check src/lib/llm_client\\.py src/main\\.py src/models/document\\.py src/repositories/document_repo\\.py src/repositories/item_repo\\.py$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^python -m ruff check src/lib/llm_client\\.py src/main\\.py src/models/document\\.py src/repositories/document_repo\\.py src/repositories/item_repo\\.py --fix$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^python -m pytest tests/unit/test_security\\.py tests/unit/test_normalizer\\.py -v --tb=short 2>&1 \\| Select-Object -First 50$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^\\.venv\\\\Scripts\\\\Activate\\.ps1; python -m pytest tests/unit/test_security\\.py tests/unit/test_normalizer\\.py -v --tb=short 2>&1 \\| Select-Object -First 50$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^python -c \"from src\\.templates\\.messages import Messages, format_save_success, format_practice_result; print\\('Messages import OK'\\); print\\(Messages\\.HELP\\[:50\\]\\); print\\(format_save_success\\('abc123'\\)\\); print\\(format_practice_result\\(3, 5\\)\\)\"$/": {
+        "approve": true,
+        "matchCommandLine": true
+      },
+      "/^python -c \"from src\\.api\\.webhook import _dispatch_command, _format_search_results; print\\('webhook import OK'\\)\"$/": {
+        "approve": true,
+        "matchCommandLine": true
       }
     }
   }

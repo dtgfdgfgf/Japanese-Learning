@@ -15,6 +15,7 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 from src.main import app
+from tests.conftest import create_message_event
 
 
 class TestAnalyzeFlowIntegration:
@@ -48,16 +49,13 @@ class TestAnalyzeFlowIntegration:
         
         signature = self._create_signature(body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "分析"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="分析", user_id=user_id, reply_token="token1")
+            ]
             mock_get_client.return_value = mock_client
 
             # Mock ExtractorService to return no deferred docs
@@ -110,16 +108,13 @@ class TestAnalyzeFlowIntegration:
         
         signature = self._create_signature(body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "分析"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="分析", user_id=user_id, reply_token="token1")
+            ]
             mock_get_client.return_value = mock_client
 
             # Mock session and extractor
@@ -213,7 +208,7 @@ class TestAnalyzeFlowIntegration:
         # Note: Full integration would require actual database setup
         # This test focuses on the API flow structure
         
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
@@ -222,12 +217,9 @@ class TestAnalyzeFlowIntegration:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 # Send content
-                mock_client.parse_events.return_value = [{
-                    "type": "message",
-                    "message": {"type": "text", "id": "1", "text": "考える（かんがえる）：思考"},
-                    "source": {"type": "user", "userId": user_id},
-                    "replyToken": "token1",
-                }]
+                mock_client.parse_events.return_value = [
+                    create_message_event(text="考える（かんがえる）：思考", user_id=user_id, reply_token="token1")
+                ]
                 response1 = await client.post(
                     "/webhook",
                     content=content_body,
@@ -239,12 +231,9 @@ class TestAnalyzeFlowIntegration:
                 assert response1.status_code == 200
                 
                 # Send save command
-                mock_client.parse_events.return_value = [{
-                    "type": "message",
-                    "message": {"type": "text", "id": "2", "text": "入庫"},
-                    "source": {"type": "user", "userId": user_id},
-                    "replyToken": "token2",
-                }]
+                mock_client.parse_events.return_value = [
+                    create_message_event(text="入庫", user_id=user_id, reply_token="token2")
+                ]
                 response2 = await client.post(
                     "/webhook",
                     content=save_body,

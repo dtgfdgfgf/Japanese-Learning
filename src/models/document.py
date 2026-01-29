@@ -8,12 +8,11 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.database import Base
-
 
 # Type aliases for document fields
 LangType = Literal["ja", "mixed", "unknown"]
@@ -110,6 +109,12 @@ class Document(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Soft delete flag",
     )
 
     # Relationships

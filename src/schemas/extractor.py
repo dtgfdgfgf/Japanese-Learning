@@ -148,8 +148,11 @@ class ExtractionSummary(BaseModel):
     
     def to_message(self) -> str:
         """Format as LINE reply message."""
+        # 延遲引入以避免循環引用
+        from src.templates.messages import Messages
+        
         if self.total_count == 0:
-            return "沒有發現可學習的單字或文法 📝"
+            return Messages.ANALYZE_EMPTY_RESULT
         
         parts = []
         if self.vocab_count > 0:
@@ -157,9 +160,9 @@ class ExtractionSummary(BaseModel):
         if self.grammar_count > 0:
             parts.append(f"{self.grammar_count} 個文法")
         
-        message = f"✨ 抽出 {' 和 '.join(parts)}"
+        message = Messages.format("ANALYZE_SUCCESS", summary=" 和 ".join(parts))
         
         if self.is_truncated:
-            message += "\n（內容較長，已限制抽取數量）"
+            message += Messages.format("ANALYZE_TRUNCATED_NOTE")
         
         return message

@@ -8,6 +8,7 @@ DoD: 測試二次確認流程；驗證清空後 items 不出現在查詢/練習
 import json
 import hashlib
 import hmac
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
 import uuid
 
@@ -16,6 +17,7 @@ from httpx import AsyncClient, ASGITransport
 
 from src.main import app
 from src.services.delete_service import _confirmation_pending
+from tests.conftest import create_message_event
 
 
 class TestDeleteLastIntegration:
@@ -53,6 +55,9 @@ class TestDeleteLastIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.parse_events.return_value = [
+                create_message_event(text="刪除最後一筆", user_id=user_id, reply_token="token1")
+            ]
             mock_line.return_value = mock_client
             
             with patch("src.api.webhook.get_session") as mock_session_ctx:
@@ -115,6 +120,9 @@ class TestClearAllIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.parse_events.return_value = [
+                create_message_event(text="清空資料", user_id=user_id, reply_token="token1")
+            ]
             mock_line.return_value = mock_client
             
             transport = ASGITransport(app=app)
@@ -156,6 +164,9 @@ class TestClearAllIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.parse_events.return_value = [
+                create_message_event(text="確定清空資料", user_id=user_id, reply_token="token1")
+            ]
             mock_line.return_value = mock_client
             
             transport = ASGITransport(app=app)
@@ -177,10 +188,9 @@ class TestClearAllIntegration:
         channel_secret = "test_secret_for_testing_only"
         
         # Simulate pending confirmation
-        from datetime import datetime
         from src.lib.security import hash_user_id
         hashed = hash_user_id(user_id)
-        _confirmation_pending[hashed] = datetime.utcnow()
+        _confirmation_pending[hashed] = datetime.now(timezone.utc)
         
         body = json.dumps({
             "destination": "Uxxxxx",
@@ -200,6 +210,9 @@ class TestClearAllIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.parse_events.return_value = [
+                create_message_event(text="確定清空資料", user_id=user_id, reply_token="token1")
+            ]
             mock_line.return_value = mock_client
             
             with patch("src.api.webhook.get_session") as mock_session_ctx:

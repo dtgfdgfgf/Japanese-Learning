@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, UserSource, DeliveryContext
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 
@@ -66,23 +67,24 @@ def edge_cases(japanese_samples: dict) -> list:
 @pytest_asyncio.fixture
 async def async_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    Create an in-memory SQLite session for testing.
-    Note: For production-like tests, use a real PostgreSQL test database.
+    建立測試用的資料庫 session。
     
-    Warning: This fixture has limited compatibility with PostgreSQL-specific
-    features like JSONB. Tests that require actual database operations should
-    use a real PostgreSQL test database or be marked with @pytest.mark.skip_sqlite.
+    行為：
+    - 預設 skip（SKIP_DB_TESTS=true 或未設定）
+    - 設定 SKIP_DB_TESTS=false 且有 PostgreSQL 測試資料庫時啟用
+    
+    Note: SQLite 不支援 JSONB，因此需要真實的 PostgreSQL 測試資料庫。
     """
-    # Note: SQLite doesn't support JSONB, so tests using this fixture
-    # with models that have JSONB columns will fail at table creation.
-    # For full database tests, use a PostgreSQL test database.
-    pytest.skip("Skipping: SQLite doesn't support JSONB type used in models")
+    skip_db = os.environ.get("SKIP_DB_TESTS", "true").lower()
+    if skip_db == "true":
+        pytest.skip("Skipping DB test: set SKIP_DB_TESTS=false to enable")
     
-    # Use SQLite for unit tests (faster, no DB required)
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        echo=False,
-    )
+    # 使用環境變數中的測試資料庫 URL
+    test_db_url = os.environ.get("TEST_DATABASE_URL", os.environ.get("DATABASE_URL"))
+    if not test_db_url or "test" not in test_db_url:
+        pytest.skip("Skipping DB test: TEST_DATABASE_URL not configured")
+    
+    engine = create_async_engine(test_db_url, echo=False)
     
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -93,6 +95,10 @@ async def async_db_session() -> AsyncGenerator[AsyncSession, None]:
     
     async with async_session() as session:
         yield session
+    
+    # 清理測試資料（可選）
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
     
     await engine.dispose()
 
@@ -166,3 +172,42 @@ def sample_japanese_text() -> str:
 def sample_user_id() -> str:
     """Sample user ID (hashed)."""
     return "hashed_user_id_for_testing"
+
+
+def create_message_event(
+    text: str,
+    user_id: str = "Utest_user",
+    reply_token: str = "test_reply_token",
+    message_id: str = "12345678901234",
+    timestamp: int = 1625665600000,
+) -> MessageEvent:
+    """建立用於測試的 LINE MessageEvent 物件。
+    
+    Args:
+        text: 訊息文字
+        user_id: LINE user ID
+        reply_token: Reply token
+        message_id: Message ID
+        timestamp: Timestamp in milliseconds
+        
+    Returns:
+        MessageEvent 物件
+    """
+    return MessageEvent(
+        type="message",
+        message=TextMessageContent(
+            type="text",
+            id=message_id,
+            text=text,
+            quoteToken="test_quote_token",  # LINE SDK 必要欄位
+        ),
+        source=UserSource(
+            type="user",
+            user_id=user_id,
+        ),
+        reply_token=reply_token,
+        timestamp=timestamp,
+        mode="active",
+        webhookEventId="test_webhook_event_id",  # LINE SDK 必要欄位
+        deliveryContext=DeliveryContext(isRedelivery=False),  # LINE SDK 必要欄位
+    )

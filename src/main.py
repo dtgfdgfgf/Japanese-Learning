@@ -47,6 +47,9 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down application")
+    from src.lib.llm_client import close_llm_client
+
+    await close_llm_client()
     await close_db()
 
 
@@ -61,6 +64,9 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+# 注意：allow_origins=["*"] 僅在 development 環境使用
+# Production 環境會設為空列表，不允許跨域請求
+# LINE Webhook 不需要 CORS，此設定主要用於本地開發測試
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.is_development else [],

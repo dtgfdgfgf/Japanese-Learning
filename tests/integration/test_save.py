@@ -16,6 +16,7 @@ from httpx import AsyncClient, ASGITransport
 
 from src.main import app
 from src.database import get_session
+from tests.conftest import create_message_event
 
 
 class TestSaveFlowIntegration:
@@ -66,23 +67,24 @@ class TestSaveFlowIntegration:
         save_signature = self._create_signature(save_body, channel_secret)
 
         # Mock the LINE client reply to avoid actual API calls
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            # 使用 create_message_event 建立正確的 MessageEvent 物件
             mock_client.parse_events.side_effect = [
-                [{
-                    "type": "message",
-                    "message": {"type": "text", "id": "1", "text": "考える（かんがえる）：思考"},
-                    "source": {"type": "user", "userId": user_id},
-                    "replyToken": "token1",
-                }],
-                [{
-                    "type": "message",
-                    "message": {"type": "text", "id": "2", "text": "入庫"},
-                    "source": {"type": "user", "userId": user_id},
-                    "replyToken": "token2",
-                }]
+                [create_message_event(
+                    text="考える（かんがえる）：思考",
+                    user_id=user_id,
+                    reply_token="token1",
+                    message_id="1",
+                )],
+                [create_message_event(
+                    text="入庫",
+                    user_id=user_id,
+                    reply_token="token2",
+                    message_id="2",
+                )],
             ]
             mock_get_client.return_value = mock_client
 
@@ -133,16 +135,13 @@ class TestSaveFlowIntegration:
         
         signature = self._create_signature(save_body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "入庫"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="入庫", user_id=user_id, reply_token="token1")
+            ]
             mock_get_client.return_value = mock_client
 
             transport = ASGITransport(app=app)
@@ -168,7 +167,7 @@ class TestSaveFlowIntegration:
             "events": []
         }).encode("utf-8")
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = False
             mock_get_client.return_value = mock_client

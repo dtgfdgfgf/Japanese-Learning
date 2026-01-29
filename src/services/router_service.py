@@ -12,6 +12,7 @@ from typing import Optional
 from src.lib.llm_client import get_llm_client
 from src.prompts.router import format_router_request, get_system_prompt
 from src.schemas.router import IntentType, RouterResponse, RouterClassification
+from src.templates.messages import Messages
 
 
 logger = logging.getLogger(__name__)
@@ -48,14 +49,13 @@ class RouterService:
             system_prompt = get_system_prompt()
             
             # Call LLM
-            response_text = await self.llm_client.chat(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+            response = await self.llm_client.complete(
+                system_prompt=system_prompt,
+                user_message=user_prompt,
                 temperature=0.3,  # Lower temperature for more consistent classification
                 max_tokens=500,
             )
+            response_text = response.content
             
             # Parse response
             return self._parse_llm_response(response_text, message)
@@ -194,20 +194,18 @@ class RouterService:
 - 鼓勵學習"""
         
         try:
-            response = await self.llm_client.chat(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message},
-                ],
+            response = await self.llm_client.complete(
+                system_prompt=system_prompt,
+                user_message=message,
                 temperature=0.7,
                 max_tokens=500,
             )
             
-            return response
+            return response.content
             
         except Exception as e:
             logger.error(f"Chat response generation failed: {e}")
-            return "抱歉，我現在無法回答這個問題 🙇\n請稍後再試，或輸入「說明」查看我能幫你做什麼。"
+            return Messages.ERROR_CHAT
 
 
 # Module-level singleton

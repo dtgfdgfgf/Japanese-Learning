@@ -78,6 +78,7 @@ class DocumentRepository(BaseRepository[Document]):
             select(Document)
             .where(Document.user_id == user_id)
             .where(Document.parse_status == "deferred")
+            .where(Document.is_deleted.is_(False))
             .order_by(Document.created_at.desc())
             .limit(limit)
         )
@@ -89,12 +90,14 @@ class DocumentRepository(BaseRepository[Document]):
         self,
         user_id: str,
         limit: int = 1,
+        include_deleted: bool = False,
     ) -> list[Document]:
         """Get most recent documents for a user.
 
         Args:
             user_id: Hashed LINE user ID
             limit: Maximum number of documents to return
+            include_deleted: Include soft-deleted documents
 
         Returns:
             List of Document instances, ordered by created_at DESC
@@ -103,6 +106,12 @@ class DocumentRepository(BaseRepository[Document]):
             select(Document)
             .where(Document.user_id == user_id)
             .order_by(Document.created_at.desc())
+        )
+
+        if not include_deleted:
+            stmt = stmt.where(Document.is_deleted.is_(False))
+
+        stmt = stmt.limit(limit
             .limit(limit)
         )
 

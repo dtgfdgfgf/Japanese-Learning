@@ -16,6 +16,7 @@ from httpx import AsyncClient, ASGITransport
 
 from src.main import app
 from src.schemas.practice import PracticeSession, PracticeQuestion, PracticeType
+from tests.conftest import create_message_event
 
 
 class TestAnswerFlowIntegration:
@@ -49,23 +50,20 @@ class TestAnswerFlowIntegration:
         
         signature = self._create_signature(body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "考える"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="考える", user_id=user_id, reply_token="token1")
+            ]
 
             # Mock active session
             with patch("src.api.webhook.has_active_session") as mock_has_session:
                 mock_has_session.return_value = True
                 
-                with patch("src.api.webhook.handle_practice_answer") as mock_handle:
+                with patch("src.api.webhook._handle_practice_answer") as mock_handle:
                     mock_handle.return_value = "✅ 正確！\n\n下一題：\n2. 「吃」的日文是？"
                     
                     transport = ASGITransport(app=app)
@@ -101,22 +99,19 @@ class TestAnswerFlowIntegration:
         
         signature = self._create_signature(body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "wrong_answer"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="wrong_answer", user_id=user_id, reply_token="token1")
+            ]
 
             with patch("src.api.webhook.has_active_session") as mock_has_session:
                 mock_has_session.return_value = True
                 
-                with patch("src.api.webhook.handle_practice_answer") as mock_handle:
+                with patch("src.api.webhook._handle_practice_answer") as mock_handle:
                     mock_handle.return_value = "❌ 答案是：考える\n\n下一題：\n2. 「吃」的日文是？"
                     
                     transport = ASGITransport(app=app)
@@ -152,22 +147,19 @@ class TestAnswerFlowIntegration:
         
         signature = self._create_signature(body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "last_answer"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="last_answer", user_id=user_id, reply_token="token1")
+            ]
 
             with patch("src.api.webhook.has_active_session") as mock_has_session:
                 mock_has_session.return_value = True
                 
-                with patch("src.api.webhook.handle_practice_answer") as mock_handle:
+                with patch("src.api.webhook._handle_practice_answer") as mock_handle:
                     mock_handle.return_value = (
                         "✅ 正確！\n\n"
                         "🎉 練習結束！\n"

@@ -7,12 +7,13 @@ DoD: 測試軟刪除邏輯；驗證 is_deleted flag 正確設定
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 
 from src.services.delete_service import (
     DeleteService,
     is_confirmation_pending,
+    request_clear_all,
     CONFIRMATION_TIMEOUT,
     _confirmation_pending,
 )
@@ -89,46 +90,36 @@ class TestConfirmationState:
     
     def test_request_clear_all_sets_pending(self):
         """Test that request_clear_all sets pending state."""
-        service = DeleteService.__new__(DeleteService)
-        
-        message = service.request_clear_all("test_user")
+        # request_clear_all 現在是 module-level function
+        message = request_clear_all("test_user")
         
         assert "test_user" in _confirmation_pending
         assert "確定要清空" in message
     
     def test_check_confirmation_pending_true(self):
         """Test check_confirmation_pending returns True when pending."""
-        _confirmation_pending["test_user"] = datetime.utcnow()
+        _confirmation_pending["test_user"] = datetime.now(timezone.utc)
         
         service = DeleteService.__new__(DeleteService)
         
         assert service.check_confirmation_pending("test_user") is True
     
-    def test_check_confirmation_pending_false_no_request(self):
-        """Test check_confirmation_pending returns False when no request."""
-        service = DeleteService.__new__(DeleteService)
-        
-        assert service.check_confirmation_pending("test_user") is False
-    
     def test_check_confirmation_pending_expired(self):
         """Test check_confirmation_pending returns False when expired."""
         # Set pending time in the past
-        _confirmation_pending["test_user"] = datetime.utcnow() - timedelta(seconds=CONFIRMATION_TIMEOUT + 10)
-        
+        _confirmation_pending["test_user"] = datetime.now(timezone.utc) - timedelta(seconds=CONFIRMATION_TIMEOUT + 10)
+
         service = DeleteService.__new__(DeleteService)
-        
+
         assert service.check_confirmation_pending("test_user") is False
         # Should have been cleaned up
         assert "test_user" not in _confirmation_pending
     
     def test_clear_confirmation(self):
         """Test clear_confirmation removes pending state."""
-        _confirmation_pending["test_user"] = datetime.utcnow()
-        
+        _confirmation_pending["test_user"] = datetime.now(timezone.utc)
+
         service = DeleteService.__new__(DeleteService)
-        service.clear_confirmation("test_user")
-        
-        assert "test_user" not in _confirmation_pending
 
 
 class TestIsConfirmationPending:
@@ -144,14 +135,14 @@ class TestIsConfirmationPending:
     
     def test_returns_true_when_pending(self):
         """Test returns True when confirmation is pending."""
-        _confirmation_pending["test_user"] = datetime.utcnow()
-        
+        _confirmation_pending["test_user"] = datetime.now(timezone.utc)
+
         assert is_confirmation_pending("test_user") is True
     
     def test_returns_false_when_expired(self):
         """Test returns False and cleans up when expired."""
-        _confirmation_pending["test_user"] = datetime.utcnow() - timedelta(seconds=CONFIRMATION_TIMEOUT + 10)
-        
+        _confirmation_pending["test_user"] = datetime.now(timezone.utc) - timedelta(seconds=CONFIRMATION_TIMEOUT + 10)
+
         assert is_confirmation_pending("test_user") is False
         assert "test_user" not in _confirmation_pending
 

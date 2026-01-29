@@ -139,7 +139,7 @@ class LLMClient:
                 is_fallback=False,
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 f"Anthropic timeout after {self.timeout}s, falling back to OpenAI"
             )
@@ -302,3 +302,15 @@ def get_llm_client() -> LLMClient:
     if _llm_client is None:
         _llm_client = LLMClient()
     return _llm_client
+
+
+async def close_llm_client() -> None:
+    """關閉 LLM client 連線。
+
+    應在應用程式 shutdown 時呼叫，釋放底層 HTTP client 資源。
+    """
+    global _llm_client
+    if _llm_client is not None:
+        await _llm_client.anthropic_client.close()
+        await _llm_client.openai_client.close()
+        _llm_client = None

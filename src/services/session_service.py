@@ -6,11 +6,9 @@ DoD: SessionService 可 get/set 當前 session；支援 in-memory 或 Redis back
 """
 
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from src.schemas.practice import PracticeSession
-
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +26,9 @@ class SessionService:
     Currently uses in-memory storage. For production, 
     this should be replaced with Redis or database-backed storage.
     """
-    
+
     @staticmethod
-    def get_session(user_id: str) -> Optional[PracticeSession]:
+    def get_session(user_id: str) -> PracticeSession | None:
         """Get active session for a user.
         
         Args:
@@ -40,23 +38,23 @@ class SessionService:
             PracticeSession if exists and not expired, None otherwise
         """
         session = _sessions.get(user_id)
-        
+
         if not session:
             return None
-        
+
         # Check expiration
         expiration = session.created_at + timedelta(minutes=SESSION_EXPIRATION_MINUTES)
-        if datetime.utcnow() > expiration:
+        if datetime.now(UTC) > expiration:
             logger.info(f"Session expired for user {user_id[:8]}")
             del _sessions[user_id]
             return None
-        
+
         # Check if complete
         if session.is_complete:
             return None
-        
+
         return session
-    
+
     @staticmethod
     def set_session(user_id: str, session: PracticeSession) -> None:
         """Store a session for a user.
@@ -67,7 +65,7 @@ class SessionService:
         """
         _sessions[user_id] = session
         logger.debug(f"Stored session {session.session_id} for user {user_id[:8]}")
-    
+
     @staticmethod
     def clear_session(user_id: str) -> bool:
         """Clear a user's session.
@@ -83,7 +81,7 @@ class SessionService:
             logger.debug(f"Cleared session for user {user_id[:8]}")
             return True
         return False
-    
+
     @staticmethod
     def has_active_session(user_id: str) -> bool:
         """Check if user has an active session.
@@ -95,7 +93,7 @@ class SessionService:
             True if active session exists
         """
         return SessionService.get_session(user_id) is not None
-    
+
     @staticmethod
     def cleanup_expired_sessions() -> int:
         """Remove all expired sessions.
@@ -103,22 +101,22 @@ class SessionService:
         Returns:
             Number of sessions cleaned up
         """
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         expired_users = []
-        
+
         for user_id, session in _sessions.items():
             expiration = session.created_at + timedelta(minutes=SESSION_EXPIRATION_MINUTES)
             if now > expiration or session.is_complete:
                 expired_users.append(user_id)
-        
+
         for user_id in expired_users:
             del _sessions[user_id]
-        
+
         if expired_users:
             logger.info(f"Cleaned up {len(expired_users)} expired sessions")
-        
+
         return len(expired_users)
-    
+
     @staticmethod
     def get_active_session_count() -> int:
         """Get count of active sessions.
@@ -130,7 +128,7 @@ class SessionService:
 
 
 # Convenience functions for backward compatibility with practice_service
-def get_active_session(user_id: str) -> Optional[PracticeSession]:
+def get_active_session(user_id: str) -> PracticeSession | None:
     """Get active session (convenience function)."""
     return SessionService.get_session(user_id)
 

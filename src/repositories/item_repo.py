@@ -4,11 +4,10 @@ T018: Implement ItemRepository in src/repositories/item_repo.py
 DoD: 可 create/get/upsert item；upsert 依 (user_id, item_type, key) 正確更新
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.item import Item
@@ -218,6 +217,14 @@ class ItemRepository(BaseRepository[Item]):
         Returns:
             List of matching Item instances
         """
+        # Escape SQL LIKE 特殊字元，防止 SQL injection
+        escaped_keyword = (
+            keyword.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{escaped_keyword}%"
+
         # Search in JSONB payload fields
         stmt = (
             select(Item)
@@ -229,17 +236,17 @@ class ItemRepository(BaseRepository[Item]):
                     and_(
                         Item.item_type == "vocab",
                         or_(
-                            Item.payload["surface"].astext.ilike(f"%{keyword}%"),
-                            Item.payload["reading"].astext.ilike(f"%{keyword}%"),
+                            Item.payload["surface"].astext.ilike(pattern),
+                            Item.payload["reading"].astext.ilike(pattern),
                         ),
                     ),
                     # Grammar: search pattern
                     and_(
                         Item.item_type == "grammar",
-                        Item.payload["pattern"].astext.ilike(f"%{keyword}%"),
+                        Item.payload["pattern"].astext.ilike(pattern),
                     ),
                     # Also search in key
-                    Item.key.ilike(f"%{keyword}%"),
+                    Item.key.ilike(pattern),
                 )
             )
             .order_by(Item.created_at.desc())
@@ -271,7 +278,7 @@ class ItemRepository(BaseRepository[Item]):
         Returns:
             List of Item instances for practice
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         day_ago = now - timedelta(hours=24)
 
         # Base query
@@ -418,10 +425,10 @@ class ItemRepository(BaseRepository[Item]):
             .order_by(func.random())
             .limit(limit)
         )
-        
+
         if exclude_ids:
             stmt = stmt.where(Item.item_id.notin_(exclude_ids))
-        
+
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

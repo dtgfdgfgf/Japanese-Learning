@@ -33,19 +33,28 @@ def router_service():
     return service
 
 
+def _create_llm_response_mock(content: str):
+    """建立模擬 LLMResponse 的 mock 對象。"""
+    mock_response = MagicMock()
+    mock_response.content = content
+    return mock_response
+
+
 class TestRouterService:
     """Tests for RouterService."""
     
     @pytest.mark.asyncio
     async def test_classify_save_intent(self, router_service):
         """Test classification of save intent."""
-        mock_response = json.dumps({
+        mock_content = json.dumps({
             "intent": "save",
             "confidence": 0.85,
             "reason": "Contains Japanese learning content"
         })
         
-        router_service.llm_client.chat = AsyncMock(return_value=mock_response)
+        router_service.llm_client.complete = AsyncMock(
+            return_value=_create_llm_response_mock(mock_content)
+        )
         
         result = await router_service.classify("今日は天気がいいですね。")
         
@@ -55,13 +64,15 @@ class TestRouterService:
     @pytest.mark.asyncio
     async def test_classify_practice_intent(self, router_service):
         """Test classification of practice intent."""
-        mock_response = json.dumps({
+        mock_content = json.dumps({
             "intent": "practice",
             "confidence": 0.9,
             "reason": "User wants to practice"
         })
         
-        router_service.llm_client.chat = AsyncMock(return_value=mock_response)
+        router_service.llm_client.complete = AsyncMock(
+            return_value=_create_llm_response_mock(mock_content)
+        )
         
         result = await router_service.classify("我要練習")
         
@@ -71,14 +82,16 @@ class TestRouterService:
     @pytest.mark.asyncio
     async def test_classify_search_with_keyword(self, router_service):
         """Test classification of search intent with keyword extraction."""
-        mock_response = json.dumps({
+        mock_content = json.dumps({
             "intent": "search",
             "confidence": 0.8,
             "keyword": "考える",
             "reason": "User searching for a word"
         })
         
-        router_service.llm_client.chat = AsyncMock(return_value=mock_response)
+        router_service.llm_client.complete = AsyncMock(
+            return_value=_create_llm_response_mock(mock_content)
+        )
         
         result = await router_service.classify("找一下「考える」")
         
@@ -88,13 +101,15 @@ class TestRouterService:
     @pytest.mark.asyncio
     async def test_classify_chat_intent(self, router_service):
         """Test classification of chat intent."""
-        mock_response = json.dumps({
+        mock_content = json.dumps({
             "intent": "chat",
             "confidence": 0.7,
             "reason": "User asking a learning question"
         })
         
-        router_service.llm_client.chat = AsyncMock(return_value=mock_response)
+        router_service.llm_client.complete = AsyncMock(
+            return_value=_create_llm_response_mock(mock_content)
+        )
         
         result = await router_service.classify("這個文法怎麼用？")
         
@@ -103,13 +118,15 @@ class TestRouterService:
     @pytest.mark.asyncio
     async def test_low_confidence_triggers_fallback(self, router_service):
         """Test that low confidence triggers fallback."""
-        mock_response = json.dumps({
+        mock_content = json.dumps({
             "intent": "unknown",
             "confidence": 0.3,
             "reason": "Cannot determine intent"
         })
         
-        router_service.llm_client.chat = AsyncMock(return_value=mock_response)
+        router_service.llm_client.complete = AsyncMock(
+            return_value=_create_llm_response_mock(mock_content)
+        )
         
         result = await router_service.classify("ok")
         
@@ -118,7 +135,7 @@ class TestRouterService:
     @pytest.mark.asyncio
     async def test_llm_error_returns_unknown(self, router_service):
         """Test that LLM errors return unknown intent."""
-        router_service.llm_client.chat = AsyncMock(
+        router_service.llm_client.complete = AsyncMock(
             side_effect=Exception("LLM Error")
         )
         
@@ -130,8 +147,8 @@ class TestRouterService:
     @pytest.mark.asyncio
     async def test_invalid_json_uses_heuristic(self, router_service):
         """Test that invalid JSON response uses heuristic fallback."""
-        router_service.llm_client.chat = AsyncMock(
-            return_value="This is not JSON"
+        router_service.llm_client.complete = AsyncMock(
+            return_value=_create_llm_response_mock("This is not JSON")
         )
         
         result = await router_service.classify("今日は天気がいい")
@@ -215,8 +232,8 @@ class TestChatResponse:
         """Test that chat responses are generated."""
         service = RouterService()
         service.llm_client = MagicMock()
-        service.llm_client.chat = AsyncMock(
-            return_value="這個文法表示完成或遺憾的語氣。"
+        service.llm_client.complete = AsyncMock(
+            return_value=_create_llm_response_mock("這個文法表示完成或遺憾的語氣。")
         )
         
         response = await service.get_chat_response("這個文法怎麼用？")
@@ -229,7 +246,7 @@ class TestChatResponse:
         """Test chat response error handling."""
         service = RouterService()
         service.llm_client = MagicMock()
-        service.llm_client.chat = AsyncMock(side_effect=Exception("Error"))
+        service.llm_client.complete = AsyncMock(side_effect=Exception("Error"))
         
         response = await service.get_chat_response("test")
         

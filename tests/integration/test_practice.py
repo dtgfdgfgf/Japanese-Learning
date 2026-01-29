@@ -15,6 +15,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from src.main import app
+from tests.conftest import create_message_event
 
 
 class TestPracticeFlowIntegration:
@@ -48,17 +49,14 @@ class TestPracticeFlowIntegration:
         
         signature = self._create_signature(body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "練習"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="練習", user_id=user_id, reply_token="token1")
+            ]
 
             # Mock session and practice service
             with patch("src.api.webhook.get_session") as mock_session:
@@ -109,17 +107,14 @@ class TestPracticeFlowIntegration:
         
         signature = self._create_signature(body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "練習"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="練習", user_id=user_id, reply_token="token1")
+            ]
 
             # Mock session
             with patch("src.api.webhook.get_session") as mock_session:
@@ -194,24 +189,21 @@ class TestPracticeFlowIntegration:
         
         signature = self._create_signature(body, channel_secret)
 
-        with patch("src.lib.line_client.get_line_client") as mock_get_client:
+        with patch("src.api.webhook.get_line_client") as mock_get_client:
             mock_client = MagicMock()
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "考える"},
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-            }]
+            mock_client.parse_events.return_value = [
+                create_message_event(text="考える", user_id=user_id, reply_token="token1")
+            ]
 
             # Mock has_active_session to return True
             with patch("src.api.webhook.has_active_session") as mock_has_session:
                 mock_has_session.return_value = True
                 
-                # Mock handle_practice_answer
-                with patch("src.api.webhook.handle_practice_answer") as mock_handle:
+                # Mock _handle_practice_answer（重構後的私有函數）
+                with patch("src.api.webhook._handle_practice_answer") as mock_handle:
                     mock_handle.return_value = "✅ 正確！"
                     
                     transport = ASGITransport(app=app)
