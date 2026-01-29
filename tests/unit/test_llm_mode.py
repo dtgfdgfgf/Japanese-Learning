@@ -1,14 +1,14 @@
 """
 complete_with_mode 的單元測試。
 
-測試 provider 分派、fallback 邏輯、mode 映射。
+測試 provider 分派、mode 映射（無 fallback）。
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.lib.llm_client import LLMClient, LLMResponse, MODE_MODEL_MAP, _MODE_FALLBACK
+from src.lib.llm_client import LLMClient, LLMResponse, MODE_MODEL_MAP
 
 
 # ============================================================================
@@ -19,32 +19,26 @@ from src.lib.llm_client import LLMClient, LLMResponse, MODE_MODEL_MAP, _MODE_FAL
 class TestModeModelMap:
     """測試模式 → provider/model 映射。"""
 
-    def test_cheap_maps_to_openai(self):
-        assert MODE_MODEL_MAP["cheap"]["provider"] == "openai"
+    def test_free_maps_to_google(self):
+        assert MODE_MODEL_MAP["free"]["provider"] == "google"
+        assert MODE_MODEL_MAP["free"]["model"] == "gemini-2.5-flash-lite"
 
-    def test_balanced_maps_to_google(self):
-        assert MODE_MODEL_MAP["balanced"]["provider"] == "google"
+    def test_cheap_maps_to_anthropic(self):
+        assert MODE_MODEL_MAP["cheap"]["provider"] == "anthropic"
+        assert MODE_MODEL_MAP["cheap"]["model"] == "claude-sonnet-4-5-20250929"
 
     def test_rigorous_maps_to_anthropic(self):
         assert MODE_MODEL_MAP["rigorous"]["provider"] == "anthropic"
+        assert MODE_MODEL_MAP["rigorous"]["model"] == "claude-opus-4-5-20251101"
 
     def test_all_modes_have_model(self):
         for mode, mapping in MODE_MODEL_MAP.items():
             assert "model" in mapping, f"{mode} 缺少 model"
             assert "provider" in mapping, f"{mode} 缺少 provider"
 
-
-class TestModeFallback:
-    """測試 fallback 順序設定。"""
-
-    def test_cheap_fallback_order(self):
-        assert _MODE_FALLBACK["cheap"] == ["google", "anthropic"]
-
-    def test_balanced_fallback_order(self):
-        assert _MODE_FALLBACK["balanced"] == ["openai", "anthropic"]
-
-    def test_rigorous_fallback_order(self):
-        assert _MODE_FALLBACK["rigorous"] == ["openai", "google"]
+    def test_no_balanced_mode(self):
+        """balanced 模式已移除。"""
+        assert "balanced" not in MODE_MODEL_MAP
 
 
 # ============================================================================
@@ -58,7 +52,7 @@ class TestCompleteWithMode:
     @pytest.mark.asyncio
     @patch.object(LLMClient, "__init__", lambda self, **kw: None)
     async def test_primary_provider_success(self):
-        """主要 provider 成功時應直接回傳，不觸發 fallback。"""
+        """主要 provider 成功時應直接回傳。"""
         client = LLMClient.__new__(LLMClient)
         client._call_provider = AsyncMock(return_value={
             "content": "test response",
@@ -67,66 +61,37 @@ class TestCompleteWithMode:
         })
 
         result = await client.complete_with_mode(
-            mode="cheap",
+            mode="free",
             system_prompt="test",
             user_message="hello",
         )
 
-        assert result.provider == "openai"
+        assert result.provider == "google"
         assert result.is_fallback is False
         assert result.content == "test response"
         client._call_provider.assert_awaited_once()
 
     @pytest.mark.asyncio
     @patch.object(LLMClient, "__init__", lambda self, **kw: None)
-    async def test_fallback_on_primary_failure(self):
-        """主要 provider 失敗時應嘗試 fallback。"""
+    async def test_primary_failure_raises_directly(self):
+        """主要 provider 失敗時應直接拋出例外，不做 fallback。"""
         client = LLMClient.__new__(LLMClient)
+        client._call_provider = AsyncMock(side_effect=RuntimeError("provider failed"))
 
-        call_count = 0
-
-        async def _mock_call_provider(
-            provider: str, model: str, **kwargs
-        ) -> dict:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise RuntimeError("Primary failed")
-            return {
-                "content": "fallback response",
-                "input_tokens": 5,
-                "output_tokens": 10,
-            }
-
-        client._call_provider = AsyncMock(side_effect=_mock_call_provider)
-
-        result = await client.complete_with_mode(
-            mode="cheap",
-            system_prompt="test",
-            user_message="hello",
-        )
-
-        assert result.is_fallback is True
-        assert result.content == "fallback response"
-
-    @pytest.mark.asyncio
-    @patch.object(LLMClient, "__init__", lambda self, **kw: None)
-    async def test_all_providers_fail_raises(self):
-        """所有 provider 都失敗時應拋出例外。"""
-        client = LLMClient.__new__(LLMClient)
-        client._call_provider = AsyncMock(side_effect=RuntimeError("all fail"))
-
-        with pytest.raises(RuntimeError, match="all fail"):
+        with pytest.raises(RuntimeError, match="provider failed"):
             await client.complete_with_mode(
                 mode="cheap",
                 system_prompt="test",
                 user_message="hello",
             )
 
+        # 只呼叫一次，無 fallback
+        assert client._call_provider.await_count == 1
+
     @pytest.mark.asyncio
     @patch.object(LLMClient, "__init__", lambda self, **kw: None)
-    async def test_unknown_mode_uses_balanced_default(self):
-        """未知模式應使用 balanced 預設。"""
+    async def test_unknown_mode_uses_free_default(self):
+        """未知模式應使用 free 預設。"""
         client = LLMClient.__new__(LLMClient)
         client._call_provider = AsyncMock(return_value={
             "content": "ok",
@@ -140,7 +105,7 @@ class TestCompleteWithMode:
             user_message="hello",
         )
 
-        # balanced 的 provider 是 google
+        # free 的 provider 是 google
         assert result.provider == "google"
 
 
@@ -162,7 +127,7 @@ class TestCallProviderDispatch:
         })
 
         result = await client._call_provider(
-            provider="anthropic", model="claude-sonnet-4-20250514",
+            provider="anthropic", model="claude-sonnet-4-5-20250929",
             system_prompt="s", user_message="u", max_tokens=100, temperature=0.5,
         )
         assert result["content"] == "anthropic"
@@ -192,7 +157,7 @@ class TestCallProviderDispatch:
         })
 
         result = await client._call_provider(
-            provider="google", model="gemini-2.5-flash",
+            provider="google", model="gemini-2.5-flash-lite",
             system_prompt="s", user_message="u", max_tokens=100, temperature=0.5,
         )
         assert result["content"] == "google"

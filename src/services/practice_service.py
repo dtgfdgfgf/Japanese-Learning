@@ -47,7 +47,7 @@ MIN_ITEMS_FOR_PRACTICE = 5
 class PracticeService:
     """Service for managing practice sessions and questions."""
 
-    def __init__(self, session: AsyncSession, mode: str = "balanced"):
+    def __init__(self, session: AsyncSession, mode: str = "free"):
         """
         Initialize PracticeService.
 

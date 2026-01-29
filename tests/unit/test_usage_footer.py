@@ -19,14 +19,14 @@ class TestFormatUsageFooter:
             daily_cap=50000,
             in_tokens=100,
             out_tokens=50,
-            mode="balanced",
+            mode="free",
         )
         assert "20%" in result
         assert "10.0k" in result
         assert "50k" in result
         assert "100 in" in result
         assert "50 out" in result
-        assert "推薦" in result
+        assert "免費" in result
 
     def test_zero_tokens_this_request(self):
         """本次 token 為 0 的情況（如 postback 事件）。"""
@@ -39,7 +39,7 @@ class TestFormatUsageFooter:
         )
         assert "0 in" in result
         assert "0 out" in result
-        assert "省錢" in result
+        assert "便宜" in result
 
     def test_cap_exceeded_warning(self):
         """額度用盡應顯示警告。"""
@@ -48,7 +48,7 @@ class TestFormatUsageFooter:
             daily_cap=50000,
             in_tokens=200,
             out_tokens=100,
-            mode="balanced",
+            mode="free",
         )
         assert "已用完" in result
         assert "100%" in result
@@ -87,7 +87,7 @@ class TestFormatUsageFooter:
             daily_cap=0,
             in_tokens=10,
             out_tokens=5,
-            mode="balanced",
+            mode="free",
         )
         assert "0%" in result
 
@@ -98,14 +98,14 @@ class TestFormatUsageFooter:
             daily_cap=50000,
             in_tokens=100,
             out_tokens=50,
-            mode="balanced",
+            mode="free",
             estimated_cost=0.0123,
         )
         assert "$0.0123" in result
 
     def test_all_modes_have_labels(self):
         """三種模式都應有對應的中文標籤。"""
-        for mode in ("cheap", "balanced", "rigorous"):
+        for mode in ("free", "cheap", "rigorous"):
             result = format_usage_footer(
                 daily_used=1000,
                 daily_cap=50000,
@@ -122,8 +122,8 @@ class TestFormatModeSwitchConfirm:
     @pytest.mark.parametrize(
         "mode,expected_label",
         [
-            ("cheap", "省錢"),
-            ("balanced", "推薦"),
+            ("free", "免費"),
+            ("cheap", "便宜"),
             ("rigorous", "嚴謹"),
         ],
     )

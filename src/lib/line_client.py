@@ -238,8 +238,8 @@ class LineClient:
 # ============================================================================
 
 _MODE_QUICK_REPLY_CONFIG: list[tuple[str, str]] = [
-    ("cheap", "省錢"),
-    ("balanced", "推薦"),
+    ("free", "免費"),
+    ("cheap", "便宜"),
     ("rigorous", "嚴謹"),
 ]
 

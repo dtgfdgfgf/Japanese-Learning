@@ -33,7 +33,7 @@ class RouterService:
         self,
         message: str,
         context: Optional[str] = None,
-        mode: str = "balanced",
+        mode: str = "free",
     ) -> RouterResponse:
         """Classify user message intent.
 
@@ -174,7 +174,7 @@ class RouterService:
         self,
         message: str,
         context: Optional[str] = None,
-        mode: str = "balanced",
+        mode: str = "free",
     ) -> str:
         """Generate a chat response for learning questions.
 

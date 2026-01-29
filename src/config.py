@@ -58,7 +58,7 @@ class Settings(BaseSettings):
 
     # LLM Mode
     default_llm_mode: str = Field(
-        default="balanced", description="Default LLM mode: cheap/balanced/rigorous"
+        default="free", description="Default LLM mode: free/cheap/rigorous"
     )
     daily_cap_tokens_free: int = Field(
         default=50000, ge=0, description="Daily free token cap per user"

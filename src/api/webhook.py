@@ -127,14 +127,14 @@ async def handle_message_event(event: MessageEvent) -> None:
 
     try:
         # 取得 user profile（含日切重置）— 失敗時使用預設值
-        current_mode = "balanced"
+        current_mode = "free"
         daily_used = 0
         daily_cap = 50000
         try:
             async with get_session() as profile_session:
                 profile_repo = UserProfileRepository(profile_session)
                 profile = await profile_repo.get_or_create(hashed_uid)
-                current_mode = profile.mode or "balanced"
+                current_mode = profile.mode or "free"
                 daily_used = profile.daily_used_tokens or 0
                 daily_cap = profile.daily_cap_tokens_free or 50000
         except Exception as e:
@@ -229,7 +229,7 @@ async def handle_postback_event(event: PostbackEvent) -> None:
         action = data.get("action", [None])[0]
         mode = data.get("mode", [None])[0]
 
-        if action == "switch_mode" and mode in ("cheap", "balanced", "rigorous"):
+        if action == "switch_mode" and mode in ("free", "cheap", "rigorous"):
             daily_used = 0
             daily_cap = 50000
             try:
@@ -281,7 +281,7 @@ async def _dispatch_command(
     command: ParsedCommand,
     line_user_id: str,
     raw_text: str,
-    mode: str = "balanced",
+    mode: str = "free",
 ) -> str:
     """Dispatch command to appropriate handler."""
     command_type = command.command_type
@@ -368,7 +368,7 @@ async def _handle_search(line_user_id: str, keyword: str | None) -> str:
             return Messages.ERROR_SEARCH
 
 
-async def _handle_analyze(line_user_id: str, mode: str = "balanced") -> str:
+async def _handle_analyze(line_user_id: str, mode: str = "free") -> str:
     """處理分析指令。"""
     hashed_user_id = hash_user_id(line_user_id)
 
@@ -400,7 +400,7 @@ async def _handle_analyze(line_user_id: str, mode: str = "balanced") -> str:
             return Messages.ERROR_ANALYZE
 
 
-async def _handle_practice(line_user_id: str, mode: str = "balanced") -> str:
+async def _handle_practice(line_user_id: str, mode: str = "free") -> str:
     """處理練習指令。"""
     hashed_user_id = hash_user_id(line_user_id)
 
@@ -503,7 +503,7 @@ async def _handle_delete_confirm(line_user_id: str) -> str:
 async def _handle_unknown(
     line_user_id: str,
     raw_text: str,
-    mode: str = "balanced",
+    mode: str = "free",
 ) -> str:
     """使用 Router LLM 處理未知指令。"""
     from src.schemas.router import IntentType

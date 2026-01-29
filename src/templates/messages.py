@@ -139,7 +139,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 • 練習 - 開始練習題
 • 查詢 <關鍵字> - 搜尋已入庫的內容
 • 用量 - 查看 API 使用量與費用
-• 省錢模式/推薦模式/嚴謹模式 - 切換 LLM 模式
+• 免費模式/便宜模式/嚴謹模式 - 切換 LLM 模式
 • 刪除最後一筆 - 刪除最近一筆入庫
 • 清空資料 - 刪除所有資料（需二次確認）
 • 隱私 - 查看資料保存說明
@@ -180,8 +180,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 
     # ========== Footer / 模式相關 ==========
     "FOOTER_USAGE": "📊API使用度：今日 {pct}%（{used_k}k / {cap_k}k tokens）｜本次 {in_tokens} in + {out_tokens} out",
-    "FOOTER_MODE": "⚙️模式：{mode_label}｜切換：〔省錢〕〔推薦〕〔嚴謹〕",
-    "FOOTER_MODE_ONLY": "⚙️模式：{mode_label}｜切換：〔省錢〕〔推薦〕〔嚴謹〕",
+    "FOOTER_MODE": "⚙️模式：{mode_label}｜切換：〔免費〕〔便宜〕〔嚴謹〕",
+    "FOOTER_MODE_ONLY": "⚙️模式：{mode_label}｜切換：〔免費〕〔便宜〕〔嚴謹〕",
     "FOOTER_UPGRADE_HINT": "💡 免費額度剩餘不多，可切換〔嚴謹〕模式獲得更精確回答",
     "FOOTER_COST_ESTIMATE": "💳若改用嚴謹模式：本次約 ${cost:.4f}",
     "FOOTER_CAP_WARNING": "⚠️ 今日免費額度已用完，仍可繼續使用",
@@ -437,9 +437,9 @@ def format_delete_clear_success(raws: int, docs: int, items: int) -> str:
 # ============================================================================
 
 MODE_LABELS: dict[str, str] = {
-    "cheap": "省錢(免費)",
-    "balanced": "推薦(免費)",
-    "rigorous": "嚴謹(付費)",
+    "free": "免費",
+    "cheap": "便宜",
+    "rigorous": "嚴謹",
 }
 
 

@@ -34,17 +34,17 @@ COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     (r"^隱私$", CommandType.PRIVACY, False),
     (r"^(說明|幫助|help)$", CommandType.HELP, False),
     (r"^(用量|cost)$", CommandType.COST, False),
-    (r"^切換(省錢|推薦|嚴謹)$", CommandType.MODE_SWITCH, True),
-    (r"^(省錢模式|推薦模式|嚴謹模式)$", CommandType.MODE_SWITCH, True),
+    (r"^切換(免費|便宜|嚴謹)$", CommandType.MODE_SWITCH, True),
+    (r"^(免費模式|便宜模式|嚴謹模式)$", CommandType.MODE_SWITCH, True),
 ]
 
 # 模式名稱 → mode key 映射
 MODE_NAME_MAP: dict[str, str] = {
-    "省錢": "cheap",
-    "推薦": "balanced",
+    "免費": "free",
+    "便宜": "cheap",
     "嚴謹": "rigorous",
-    "省錢模式": "cheap",
-    "推薦模式": "balanced",
+    "免費模式": "free",
+    "便宜模式": "cheap",
     "嚴謹模式": "rigorous",
 }
 

@@ -1,7 +1,7 @@
 """
 模式切換指令解析的單元測試。
 
-測試文字指令「省錢模式」「切換推薦」等解析為 MODE_SWITCH。
+測試文字指令「免費模式」「切換便宜」等解析為 MODE_SWITCH。
 """
 
 import pytest
@@ -16,11 +16,11 @@ class TestModeSwitchParsing:
     @pytest.mark.parametrize(
         "text,expected_keyword",
         [
-            ("省錢模式", "省錢模式"),
-            ("推薦模式", "推薦模式"),
+            ("免費模式", "免費模式"),
+            ("便宜模式", "便宜模式"),
             ("嚴謹模式", "嚴謹模式"),
-            ("切換省錢", "省錢"),
-            ("切換推薦", "推薦"),
+            ("切換免費", "免費"),
+            ("切換便宜", "便宜"),
             ("切換嚴謹", "嚴謹"),
         ],
     )
@@ -48,11 +48,11 @@ class TestModeNameMap:
     @pytest.mark.parametrize(
         "name,expected_key",
         [
-            ("省錢", "cheap"),
-            ("推薦", "balanced"),
+            ("免費", "free"),
+            ("便宜", "cheap"),
             ("嚴謹", "rigorous"),
-            ("省錢模式", "cheap"),
-            ("推薦模式", "balanced"),
+            ("免費模式", "free"),
+            ("便宜模式", "cheap"),
             ("嚴謹模式", "rigorous"),
         ],
     )

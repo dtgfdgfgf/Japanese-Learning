@@ -35,9 +35,9 @@ class UserProfile(Base):
     mode: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        default="balanced",
-        server_default="balanced",
-        comment="LLM mode: cheap/balanced/rigorous",
+        default="free",
+        server_default="free",
+        comment="LLM mode: free/cheap/rigorous",
     )
     daily_cap_tokens_free: Mapped[int] = mapped_column(
         Integer,

@@ -62,7 +62,7 @@ class TestHandlePostbackEvent:
         # 確認回覆包含省錢
         call_args = mock_line.reply_with_quick_reply.call_args
         reply_text = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("text", "")
-        assert "省錢" in reply_text
+        assert "便宜" in reply_text
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.get_line_client")

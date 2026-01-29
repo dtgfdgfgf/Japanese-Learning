@@ -56,7 +56,7 @@ class ExtractorService:
         self,
         doc_id: str,
         user_id: str,
-        mode: str = "balanced",
+        mode: str = "free",
     ) -> ExtractorResponse:
         """
         Extract vocabulary and grammar items from a document.
@@ -163,7 +163,7 @@ class ExtractorService:
         self,
         raw_text: str,
         max_items: int,
-        mode: str = "balanced",
+        mode: str = "free",
     ) -> tuple[list[ExtractedItem], LLMTrace]:
         """
         Call LLM to extract items from text.

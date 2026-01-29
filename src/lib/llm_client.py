@@ -84,16 +84,9 @@ usage_context_var: ContextVar[UsageContext | None] = ContextVar(
 
 # 模式 → provider / model 映射
 MODE_MODEL_MAP: dict[str, dict[str, str]] = {
-    "cheap": {"provider": "openai", "model": "gpt-4o-mini"},
-    "balanced": {"provider": "google", "model": "gemini-2.5-flash"},
-    "rigorous": {"provider": "anthropic", "model": "claude-sonnet-4-20250514"},
-}
-
-# 模式 fallback 順序（失敗時依序嘗試）
-_MODE_FALLBACK: dict[str, list[str]] = {
-    "cheap": ["google", "anthropic"],
-    "balanced": ["openai", "anthropic"],
-    "rigorous": ["openai", "google"],
+    "free": {"provider": "google", "model": "gemini-2.5-flash-lite"},
+    "cheap": {"provider": "anthropic", "model": "claude-sonnet-4-5-20250929"},
+    "rigorous": {"provider": "anthropic", "model": "claude-opus-4-5-20251101"},
 }
 
 
@@ -339,10 +332,12 @@ class LLMClient:
         temperature: float = 0.7,
         json_mode: bool = False,
     ) -> LLMResponse:
-        """根據模式選擇 provider/model 完成 LLM 呼叫，失敗時 fallback。
+        """根據模式選擇 provider/model 完成 LLM 呼叫。
+
+        無 fallback 機制，主 provider 失敗直接拋出例外。
 
         Args:
-            mode: cheap / balanced / rigorous
+            mode: free / cheap / rigorous
             system_prompt: System 指令
             user_message: 使用者輸入
             max_tokens: 最大 token 數
@@ -352,77 +347,33 @@ class LLMClient:
         Returns:
             LLMResponse
         """
-        mapping = MODE_MODEL_MAP.get(mode, MODE_MODEL_MAP["balanced"])
+        mapping = MODE_MODEL_MAP.get(mode, MODE_MODEL_MAP["free"])
         provider = mapping["provider"]
         model = mapping["model"]
 
         start_time = time.time()
-        last_error: Exception | None = None
 
-        # 嘗試主要 provider
-        try:
-            response = await self._call_provider(
-                provider=provider,
-                model=model,
-                system_prompt=system_prompt,
-                user_message=user_message,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                json_mode=json_mode,
-            )
-            latency_ms = int((time.time() - start_time) * 1000)
-            resp = LLMResponse(
-                content=response["content"],
-                model=model,
-                provider=provider,
-                input_tokens=response["input_tokens"],
-                output_tokens=response["output_tokens"],
-                latency_ms=latency_ms,
-                is_fallback=False,
-            )
-            _accumulate_usage(resp.input_tokens, resp.output_tokens)
-            return resp
-        except Exception as e:
-            logger.warning(f"{provider}/{model} failed: {e}, trying fallback")
-            last_error = e
-
-        # Fallback：依序嘗試備援 provider
-        fallback_providers = _MODE_FALLBACK.get(mode, ["openai"])
-        for fb_provider in fallback_providers:
-            fb_mapping = next(
-                (v for v in MODE_MODEL_MAP.values() if v["provider"] == fb_provider),
-                None,
-            )
-            if fb_mapping is None:
-                continue
-            fb_model = fb_mapping["model"]
-            try:
-                response = await self._call_provider(
-                    provider=fb_provider,
-                    model=fb_model,
-                    system_prompt=system_prompt,
-                    user_message=user_message,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    json_mode=json_mode,
-                )
-                latency_ms = int((time.time() - start_time) * 1000)
-                resp = LLMResponse(
-                    content=response["content"],
-                    model=fb_model,
-                    provider=fb_provider,
-                    input_tokens=response["input_tokens"],
-                    output_tokens=response["output_tokens"],
-                    latency_ms=latency_ms,
-                    is_fallback=True,
-                )
-                _accumulate_usage(resp.input_tokens, resp.output_tokens)
-                return resp
-            except Exception as e:
-                logger.warning(f"Fallback {fb_provider}/{fb_model} failed: {e}")
-                last_error = e
-
-        raise last_error or RuntimeError("All LLM providers failed")
+        response = await self._call_provider(
+            provider=provider,
+            model=model,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            json_mode=json_mode,
+        )
+        latency_ms = int((time.time() - start_time) * 1000)
+        resp = LLMResponse(
+            content=response["content"],
+            model=model,
+            provider=provider,
+            input_tokens=response["input_tokens"],
+            output_tokens=response["output_tokens"],
+            latency_ms=latency_ms,
+            is_fallback=False,
+        )
+        _accumulate_usage(resp.input_tokens, resp.output_tokens)
+        return resp
 
     async def _call_provider(
         self,
