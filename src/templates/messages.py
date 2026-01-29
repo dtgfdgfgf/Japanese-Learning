@@ -179,7 +179,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "COST_TOTAL_LINE": "\n💰 總計：${total:.4f}",
 
     # ========== Footer / 模式相關 ==========
-    "FOOTER_USAGE": "📊本次：{in_tokens} in + {out_tokens} out ≈ ${cost}｜今日 {pct}%（{used_k}k / {cap_k}k）",
+    "FOOTER_USAGE": "📊本次：{in_tokens} in + {out_tokens} out ≈ ${cost}｜今日 {pct}%（{used} / {cap}）",
     "FOOTER_MODE": "⚙️模式：{mode_label}｜切換：〔免費〕〔便宜〕〔嚴謹〕",
     "FOOTER_MODE_ONLY": "⚙️模式：{mode_label}｜切換：〔免費〕〔便宜〕〔嚴謹〕",
     "FOOTER_UPGRADE_HINT": "💡 免費額度剩餘不多，可切換〔嚴謹〕模式獲得更精確回答",
@@ -456,6 +456,13 @@ def calculate_cost(mode: str, in_tokens: int, out_tokens: int) -> float:
     return (in_tokens * input_price + out_tokens * output_price) / 1_000_000
 
 
+def _format_tokens(n: int) -> str:
+    """將 token 數格式化為易讀字串：< 1000 顯示原數字，≥ 1000 顯示 k。"""
+    if n < 1000:
+        return str(n)
+    return f"{n / 1000:.1f}k"
+
+
 def format_usage_footer(
     daily_used: int,
     daily_cap: int,
@@ -483,13 +490,11 @@ def format_usage_footer(
 
     if daily_cap > 0:
         pct = min(int(daily_used / daily_cap * 100), 100)
-        used_k = f"{daily_used / 1000:.1f}"
-        cap_k = f"{daily_cap / 1000:.0f}"
         lines.append(Messages.format(
             "FOOTER_USAGE",
             pct=pct,
-            used_k=used_k,
-            cap_k=cap_k,
+            used=_format_tokens(daily_used),
+            cap=_format_tokens(daily_cap),
             in_tokens=in_tokens,
             out_tokens=out_tokens,
             cost=cost_str,
@@ -498,8 +503,8 @@ def format_usage_footer(
         lines.append(Messages.format(
             "FOOTER_USAGE",
             pct=0,
-            used_k="0",
-            cap_k="0",
+            used="0",
+            cap="0",
             in_tokens=in_tokens,
             out_tokens=out_tokens,
             cost=cost_str,

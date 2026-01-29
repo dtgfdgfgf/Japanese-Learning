@@ -13,6 +13,11 @@ from src.models.user_profile import UserProfile
 
 logger = logging.getLogger(__name__)
 
+# 舊模式值 → 新模式值映射（相容 migration 前的 DB 資料）
+_LEGACY_MODE_MAP: dict[str, str] = {
+    "balanced": "free",
+}
+
 # Asia/Taipei = UTC+8
 _TAIPEI_OFFSET = timezone(timedelta(hours=8))
 
@@ -57,6 +62,12 @@ class UserProfileRepository:
         if now_utc >= profile.reset_at:
             profile.daily_used_tokens = 0
             profile.reset_at = _next_reset_at()
+            await self.session.flush()
+
+        # 舊模式值相容處理
+        new_mode = _LEGACY_MODE_MAP.get(profile.mode)
+        if new_mode:
+            profile.mode = new_mode
             await self.session.flush()
 
         return profile

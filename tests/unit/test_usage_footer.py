@@ -55,11 +55,23 @@ class TestFormatUsageFooter:
         )
         assert "20%" in result
         assert "10.0k" in result
-        assert "50k" in result
+        assert "50.0k" in result
         assert "100 in" in result
         assert "50 out" in result
         assert "免費" in result
         assert "$0" in result
+
+    def test_small_daily_used_shows_raw_number(self):
+        """daily_used < 1000 時應顯示原始數字而非 k。"""
+        result = format_usage_footer(
+            daily_used=459,
+            daily_cap=50000,
+            in_tokens=404,
+            out_tokens=55,
+            mode="free",
+        )
+        # daily_used 顯示為 "459" 而非 "0.5k" 或 "0.0k"
+        assert "459 /" in result
 
     def test_cheap_mode_shows_cost(self):
         """便宜模式應顯示非零花費。"""
