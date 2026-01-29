@@ -126,13 +126,19 @@ async def handle_message_event(event: MessageEvent) -> None:
     token = usage_context_var.set(usage_ctx)
 
     try:
-        # 取得 user profile（含日切重置）
-        async with get_session() as profile_session:
-            profile_repo = UserProfileRepository(profile_session)
-            profile = await profile_repo.get_or_create(hashed_uid)
-            current_mode = profile.mode
-            daily_used = profile.daily_used_tokens
-            daily_cap = profile.daily_cap_tokens_free
+        # 取得 user profile（含日切重置）— 失敗時使用預設值
+        current_mode = "balanced"
+        daily_used = 0
+        daily_cap = 50000
+        try:
+            async with get_session() as profile_session:
+                profile_repo = UserProfileRepository(profile_session)
+                profile = await profile_repo.get_or_create(hashed_uid)
+                current_mode = profile.mode or "balanced"
+                daily_used = profile.daily_used_tokens or 0
+                daily_cap = profile.daily_cap_tokens_free or 50000
+        except Exception as e:
+            logger.warning(f"Failed to load user profile, using defaults: {e}")
 
         # 解析指令
         parsed = parse_command(text)
@@ -144,10 +150,13 @@ async def handle_message_event(event: MessageEvent) -> None:
             # 模式切換
             mode_key = _resolve_mode_key(parsed)
             if mode_key:
-                async with get_session() as session:
-                    repo = UserProfileRepository(session)
-                    profile = await repo.set_mode(hashed_uid, mode_key)
-                    current_mode = profile.mode
+                try:
+                    async with get_session() as session:
+                        repo = UserProfileRepository(session)
+                        profile = await repo.set_mode(hashed_uid, mode_key)
+                        current_mode = profile.mode
+                except Exception as e:
+                    logger.warning(f"Failed to set mode: {e}")
                 response = format_mode_switch_confirm(mode_key)
             else:
                 response = Messages.FALLBACK_UNKNOWN
@@ -162,10 +171,13 @@ async def handle_message_event(event: MessageEvent) -> None:
         # 累加本次 token 使用量到 user profile
         total_tokens = usage_ctx.total_tokens
         if total_tokens > 0:
-            async with get_session() as session:
-                repo = UserProfileRepository(session)
-                profile = await repo.add_tokens(hashed_uid, total_tokens)
-                daily_used = profile.daily_used_tokens
+            try:
+                async with get_session() as session:
+                    repo = UserProfileRepository(session)
+                    profile = await repo.add_tokens(hashed_uid, total_tokens)
+                    daily_used = profile.daily_used_tokens
+            except Exception as e:
+                logger.warning(f"Failed to update token usage: {e}")
 
         # 組裝 footer
         footer = format_usage_footer(
@@ -191,6 +203,13 @@ async def handle_message_event(event: MessageEvent) -> None:
         if parsed.command_type == CommandType.UNKNOWN and not has_active_session(hashed_uid):
             _user_last_message[user_id] = text
 
+    except Exception as e:
+        # 最後防線：確保使用者至少收到回覆
+        logger.exception(f"Unhandled error in message handler: {e}")
+        try:
+            await line_client.reply_message(reply_token, Messages.ERROR_GENERIC)
+        except Exception:
+            logger.exception("Failed to send fallback error reply")
     finally:
         usage_context_var.reset(token)
 
@@ -204,31 +223,45 @@ async def handle_postback_event(event: PostbackEvent) -> None:
     if not user_id or not reply_token:
         return
 
-    hashed_uid = hash_user_id(user_id)
-    data = parse_qs(event.postback.data) if event.postback else {}
-    action = data.get("action", [None])[0]
-    mode = data.get("mode", [None])[0]
+    try:
+        hashed_uid = hash_user_id(user_id)
+        data = parse_qs(event.postback.data) if event.postback else {}
+        action = data.get("action", [None])[0]
+        mode = data.get("mode", [None])[0]
 
-    if action == "switch_mode" and mode in ("cheap", "balanced", "rigorous"):
-        async with get_session() as session:
-            repo = UserProfileRepository(session)
-            profile = await repo.set_mode(hashed_uid, mode)
+        if action == "switch_mode" and mode in ("cheap", "balanced", "rigorous"):
+            daily_used = 0
+            daily_cap = 50000
+            try:
+                async with get_session() as session:
+                    repo = UserProfileRepository(session)
+                    profile = await repo.set_mode(hashed_uid, mode)
+                    daily_used = profile.daily_used_tokens or 0
+                    daily_cap = profile.daily_cap_tokens_free or 50000
+            except Exception as e:
+                logger.warning(f"Failed to set mode via postback: {e}")
 
-        confirm_msg = format_mode_switch_confirm(mode)
+            confirm_msg = format_mode_switch_confirm(mode)
 
-        # 附加簡易 footer
-        footer = format_usage_footer(
-            daily_used=profile.daily_used_tokens,
-            daily_cap=profile.daily_cap_tokens_free,
-            in_tokens=0,
-            out_tokens=0,
-            mode=mode,
-        )
-        full_response = f"{confirm_msg}\n\n{footer}"
-        quick_reply = build_mode_quick_replies(mode)
-        await line_client.reply_with_quick_reply(reply_token, full_response, quick_reply)
-    else:
-        logger.warning(f"Unknown postback: {event.postback.data if event.postback else 'None'}")
+            # 附加簡易 footer
+            footer = format_usage_footer(
+                daily_used=daily_used,
+                daily_cap=daily_cap,
+                in_tokens=0,
+                out_tokens=0,
+                mode=mode,
+            )
+            full_response = f"{confirm_msg}\n\n{footer}"
+            quick_reply = build_mode_quick_replies(mode)
+            await line_client.reply_with_quick_reply(reply_token, full_response, quick_reply)
+        else:
+            logger.warning(f"Unknown postback: {event.postback.data if event.postback else 'None'}")
+    except Exception as e:
+        logger.exception(f"Unhandled error in postback handler: {e}")
+        try:
+            await line_client.reply_message(reply_token, Messages.ERROR_GENERIC)
+        except Exception:
+            logger.exception("Failed to send fallback error reply for postback")
 
 
 # ============================================================================
