@@ -73,6 +73,18 @@ class TestParseCommand:
         assert result.command_type == CommandType.HELP
         assert result.keyword is None
 
+    def test_parse_stats_command(self):
+        """Test parsing '統計' command."""
+        result = parse_command("統計")
+        assert result.command_type == CommandType.STATS
+        assert result.keyword is None
+
+    def test_parse_stats_progress_command(self):
+        """Test parsing '進度' command."""
+        result = parse_command("進度")
+        assert result.command_type == CommandType.STATS
+        assert result.keyword is None
+
     def test_parse_unknown_command(self):
         """Test parsing unknown command."""
         result = parse_command("隨便打的文字")

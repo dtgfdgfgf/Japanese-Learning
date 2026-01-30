@@ -199,7 +199,7 @@ class TestPracticeFlowIntegration:
             ]
 
             # Mock has_active_session to return True
-            with patch("src.api.webhook.has_active_session") as mock_has_session:
+            with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
                 mock_has_session.return_value = True
                 
                 # Mock _handle_practice_answer（重構後的私有函數）

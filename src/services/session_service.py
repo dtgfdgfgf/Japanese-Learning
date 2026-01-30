@@ -1,143 +1,53 @@
 """
 Session service for managing practice session state.
 
-T057: Create practice session state tracking in src/services/session_service.py
-DoD: SessionService 可 get/set 當前 session；支援 in-memory 或 Redis backend
+DB-backed 版本：透過 PracticeSessionRepository 持久化 session，
+解決重啟遺失、多 worker 並發不安全問題。
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.repositories.practice_session_repo import PracticeSessionRepository
 from src.schemas.practice import PracticeSession
 
 logger = logging.getLogger(__name__)
 
-# In-memory session store
-# Key: user_id (hashed), Value: PracticeSession
-_sessions: dict[str, PracticeSession] = {}
-
-# Session expiration time (30 minutes)
-SESSION_EXPIRATION_MINUTES = 30
-
 
 class SessionService:
-    """Service for managing user session state.
-    
-    Currently uses in-memory storage. For production, 
-    this should be replaced with Redis or database-backed storage.
-    """
+    """Service for managing user session state（DB-backed）。"""
 
-    @staticmethod
-    def get_session(user_id: str) -> PracticeSession | None:
-        """Get active session for a user.
-        
-        Args:
-            user_id: Hashed user ID
-            
-        Returns:
-            PracticeSession if exists and not expired, None otherwise
-        """
-        session = _sessions.get(user_id)
+    def __init__(self, session: AsyncSession) -> None:
+        self.repo = PracticeSessionRepository(session)
 
-        if not session:
-            return None
+    async def get_session(self, user_id: str) -> PracticeSession | None:
+        """取得使用者的有效 session。"""
+        return await self.repo.get_active(user_id)
 
-        # Check expiration
-        expiration = session.created_at + timedelta(minutes=SESSION_EXPIRATION_MINUTES)
-        if datetime.now(UTC) > expiration:
-            logger.info(f"Session expired for user {user_id[:8]}")
-            del _sessions[user_id]
-            return None
+    async def set_session(self, user_id: str, practice_session: PracticeSession) -> None:
+        """儲存 session（會 soft delete 舊的）。"""
+        await self.repo.upsert(user_id, practice_session)
+        logger.debug(f"Stored session {practice_session.session_id} for user {user_id[:8]}")
 
-        # Check if complete
-        if session.is_complete:
-            return None
+    async def update_session(self, user_id: str, practice_session: PracticeSession) -> None:
+        """更新現有 session 的 state（不建新記錄）。"""
+        await self.repo.update_state(user_id, practice_session)
 
-        return session
+    async def clear_session(self, user_id: str) -> bool:
+        """清除使用者的 session。"""
+        await self.repo.delete(user_id)
+        logger.debug(f"Cleared session for user {user_id[:8]}")
+        return True
 
-    @staticmethod
-    def set_session(user_id: str, session: PracticeSession) -> None:
-        """Store a session for a user.
-        
-        Args:
-            user_id: Hashed user ID
-            session: PracticeSession to store
-        """
-        _sessions[user_id] = session
-        logger.debug(f"Stored session {session.session_id} for user {user_id[:8]}")
+    async def has_active_session(self, user_id: str) -> bool:
+        """檢查使用者是否有進行中的 session。"""
+        session = await self.repo.get_active(user_id)
+        return session is not None
 
-    @staticmethod
-    def clear_session(user_id: str) -> bool:
-        """Clear a user's session.
-        
-        Args:
-            user_id: Hashed user ID
-            
-        Returns:
-            True if session was cleared, False if no session existed
-        """
-        if user_id in _sessions:
-            del _sessions[user_id]
-            logger.debug(f"Cleared session for user {user_id[:8]}")
-            return True
-        return False
-
-    @staticmethod
-    def has_active_session(user_id: str) -> bool:
-        """Check if user has an active session.
-        
-        Args:
-            user_id: Hashed user ID
-            
-        Returns:
-            True if active session exists
-        """
-        return SessionService.get_session(user_id) is not None
-
-    @staticmethod
-    def cleanup_expired_sessions() -> int:
-        """Remove all expired sessions.
-        
-        Returns:
-            Number of sessions cleaned up
-        """
-        now = datetime.now(UTC)
-        expired_users = []
-
-        for user_id, session in _sessions.items():
-            expiration = session.created_at + timedelta(minutes=SESSION_EXPIRATION_MINUTES)
-            if now > expiration or session.is_complete:
-                expired_users.append(user_id)
-
-        for user_id in expired_users:
-            del _sessions[user_id]
-
-        if expired_users:
-            logger.info(f"Cleaned up {len(expired_users)} expired sessions")
-
-        return len(expired_users)
-
-    @staticmethod
-    def get_active_session_count() -> int:
-        """Get count of active sessions.
-        
-        Returns:
-            Number of active sessions
-        """
-        return len(_sessions)
-
-
-# Convenience functions for backward compatibility with practice_service
-def get_active_session(user_id: str) -> PracticeSession | None:
-    """Get active session (convenience function)."""
-    return SessionService.get_session(user_id)
-
-
-def has_active_session(user_id: str) -> bool:
-    """Check if user has active session (convenience function)."""
-    return SessionService.has_active_session(user_id)
-
-
-def clear_session(user_id: str) -> None:
-    """Clear user session (convenience function)."""
-    SessionService.clear_session(user_id)
+    async def cleanup_expired_sessions(self) -> int:
+        """清除所有過期 sessions。"""
+        count = await self.repo.cleanup_expired()
+        if count:
+            logger.info(f"Cleaned up {count} expired sessions")
+        return count

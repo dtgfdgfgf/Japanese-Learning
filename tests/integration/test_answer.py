@@ -60,7 +60,7 @@ class TestAnswerFlowIntegration:
             ]
 
             # Mock active session
-            with patch("src.api.webhook.has_active_session") as mock_has_session:
+            with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
                 mock_has_session.return_value = True
                 
                 with patch("src.api.webhook._handle_practice_answer") as mock_handle:
@@ -108,7 +108,7 @@ class TestAnswerFlowIntegration:
                 create_message_event(text="wrong_answer", user_id=user_id, reply_token="token1")
             ]
 
-            with patch("src.api.webhook.has_active_session") as mock_has_session:
+            with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
                 mock_has_session.return_value = True
                 
                 with patch("src.api.webhook._handle_practice_answer") as mock_handle:
@@ -156,7 +156,7 @@ class TestAnswerFlowIntegration:
                 create_message_event(text="last_answer", user_id=user_id, reply_token="token1")
             ]
 
-            with patch("src.api.webhook.has_active_session") as mock_has_session:
+            with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
                 mock_has_session.return_value = True
                 
                 with patch("src.api.webhook._handle_practice_answer") as mock_handle:
@@ -187,7 +187,8 @@ class TestPracticeLogCreation:
     async def test_log_created_on_answer(self, async_db_session):
         """Test that practice_log is created when answer is submitted."""
         from src.services.practice_service import PracticeService
-        
+        from src.services.session_service import SessionService
+
         # Create mock question in session
         mock_question = PracticeQuestion(
             question_id=str(uuid.uuid4()),
@@ -197,36 +198,34 @@ class TestPracticeLogCreation:
             expected_answer="考える",
             item_key="vocab:考える",
         )
-        
-        mock_session = PracticeSession(
+
+        mock_practice_session = PracticeSession(
             session_id=str(uuid.uuid4()),
             user_id="test_user",
             questions=[mock_question],
             current_index=0,
         )
-        
-        # Store session
-        from src.services.practice_service import _sessions
-        _sessions["test_user"] = mock_session
-        
-        # Mock the practice log repo
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
-            service = PracticeService.__new__(PracticeService)
-            service.session = async_db_session
-            service.item_repo = MagicMock()
-            service.practice_log_repo = MagicMock()
-            service.practice_log_repo.create = AsyncMock()
-            
-            # Submit correct answer
-            answer, message = await service.submit_answer("test_user", "考える")
-            
-            # Verify log was created
-            service.practice_log_repo.create.assert_called_once()
-            call_args = service.practice_log_repo.create.call_args
-            
-            assert call_args[1]["user_id"] == "test_user"
-            assert call_args[1]["is_correct"] is True
-        
-        # Cleanup
-        _sessions.pop("test_user", None)
+
+        # Mock SessionService 回傳預設 session
+        mock_session_service = MagicMock(spec=SessionService)
+        mock_session_service.get_session = AsyncMock(return_value=mock_practice_session)
+        mock_session_service.update_session = AsyncMock()
+        mock_session_service.clear_session = AsyncMock()
+
+        service = PracticeService.__new__(PracticeService)
+        service.session = async_db_session
+        service.item_repo = MagicMock()
+        service.practice_log_repo = MagicMock()
+        service.practice_log_repo.create = AsyncMock()
+        service.session_service = mock_session_service
+
+        # Submit correct answer
+        answer, message = await service.submit_answer("test_user", "考える")
+
+        # Verify log was created
+        service.practice_log_repo.create.assert_called_once()
+        call_args = service.practice_log_repo.create.call_args
+
+        assert call_args[1]["user_id"] == "test_user"
+        assert call_args[1]["is_correct"] is True
 

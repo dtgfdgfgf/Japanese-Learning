@@ -16,7 +16,6 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from src.main import app
-from src.services.delete_service import _confirmation_pending
 from tests.conftest import create_message_event
 
 
@@ -91,10 +90,6 @@ class TestClearAllIntegration:
             body,
             hashlib.sha256
         ).hexdigest()
-
-    def setup_method(self):
-        """Clear confirmation state before each test."""
-        _confirmation_pending.clear()
 
     @pytest.mark.asyncio
     async def test_clear_all_prompts_confirmation(self):
@@ -187,11 +182,6 @@ class TestClearAllIntegration:
         user_id = "Utest_clear_with_pending"
         channel_secret = "test_secret_for_testing_only"
         
-        # Simulate pending confirmation
-        from src.lib.security import hash_user_id
-        hashed = hash_user_id(user_id)
-        _confirmation_pending[hashed] = datetime.now(timezone.utc)
-        
         body = json.dumps({
             "destination": "Uxxxxx",
             "events": [{
@@ -219,21 +209,23 @@ class TestClearAllIntegration:
                 mock_session = AsyncMock()
                 mock_session.commit = AsyncMock()
                 mock_session_ctx.return_value.__aenter__.return_value = mock_session
-                
-                with patch("src.services.delete_service.DeleteService.clear_all_data") as mock_clear:
-                    mock_clear.return_value = (10, "已清空所有資料 🗑️")
-                    
-                    transport = ASGITransport(app=app)
-                    async with AsyncClient(transport=transport, base_url="http://test") as client:
-                        response = await client.post(
-                            "/webhook",
-                            content=body,
-                            headers={
-                                "X-Line-Signature": signature,
-                                "Content-Type": "application/json"
-                            }
-                        )
-                        assert response.status_code == 200
+
+                with patch("src.repositories.user_state_repo.UserStateRepository.is_delete_confirmation_pending", new_callable=AsyncMock, return_value=True):
+                    with patch("src.repositories.user_state_repo.UserStateRepository.clear_delete_confirm", new_callable=AsyncMock):
+                        with patch("src.services.delete_service.DeleteService.clear_all_data") as mock_clear:
+                            mock_clear.return_value = (10, "已清空所有資料 🗑️")
+
+                            transport = ASGITransport(app=app)
+                            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                                response = await client.post(
+                                    "/webhook",
+                                    content=body,
+                                    headers={
+                                        "X-Line-Signature": signature,
+                                        "Content-Type": "application/json"
+                                    }
+                                )
+                                assert response.status_code == 200
 
 
 class TestDeletedDataExclusion:

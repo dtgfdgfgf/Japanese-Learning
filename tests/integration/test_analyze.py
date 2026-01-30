@@ -53,6 +53,7 @@ class TestAnalyzeFlowIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.reply_with_quick_reply = AsyncMock()
             mock_client.parse_events.return_value = [
                 create_message_event(text="分析", user_id=user_id, reply_token="token1")
             ]
@@ -63,7 +64,7 @@ class TestAnalyzeFlowIntegration:
                 mock_session_instance = MagicMock()
                 mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_session_instance)
                 mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
-                
+
                 with patch("src.services.extractor_service.ExtractorService") as mock_extractor:
                     mock_extractor_instance = MagicMock()
                     mock_extractor_instance.get_deferred_documents = AsyncMock(return_value=[])
@@ -80,10 +81,10 @@ class TestAnalyzeFlowIntegration:
                             }
                         )
                         assert response.status_code == 200
-                        
+
                         # Should reply with "no pending documents" message
-                        mock_client.reply_message.assert_called()
-                        reply_args = mock_client.reply_message.call_args
+                        mock_client.reply_with_quick_reply.assert_called()
+                        reply_args = mock_client.reply_with_quick_reply.call_args
                         reply_text = reply_args[0][1] if reply_args[0] else reply_args[1].get("text", "")
                         # Check for expected message content
                         assert "待分析" in reply_text or "入庫" in reply_text

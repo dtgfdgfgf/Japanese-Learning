@@ -35,6 +35,7 @@ class PracticeLog(Base):
         score: Optional numeric score (0-1)
         feedback: Optional feedback text
         created_at: Creation timestamp
+        is_deleted: Soft delete flag
     """
 
     __tablename__ = "practice_logs"
@@ -90,6 +91,13 @@ class PracticeLog(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=func.literal(False),
+        comment="Soft delete flag",
     )
 
     # Relationships

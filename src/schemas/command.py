@@ -23,6 +23,7 @@ class CommandType(str, Enum):
     PRIVACY = "privacy"  # 隱私
     HELP = "help"  # 說明
     COST = "cost"  # 用量
+    STATS = "stats"  # 統計
     MODE_SWITCH = "mode_switch"  # 模式切換
     UNKNOWN = "unknown"  # 未知指令
 

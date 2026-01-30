@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__filesystem__directory_tree",
+      "Bash(python -m pytest:*)",
+      "Bash(pip install:*)",
+      "Bash(where:*)",
+      "Bash(python -m pip install:*)",
+      "Bash(git status:*)",
+      "WebSearch",
+      "Bash(alembic revision:*)",
+      "Bash(python -m alembic revision:*)",
+      "mcp__filesystem__read_multiple_files",
+      "Bash(python -c:*)",
+      "Bash(python -m alembic:*)",
+      "mcp__filesystem__read_text_file",
+      "mcp__filesystem__list_allowed_directories",
+      "Bash(python3:*)",
+      "mcp__filesystem__list_directory"
+    ]
+  }
+}

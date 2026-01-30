@@ -10,12 +10,14 @@ T051: Format LINE reply with practice questions
 """
 
 import logging
+import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.lib.normalizer import is_correct_answer
+from src.lib.normalizer import is_correct_answer, normalize_for_compare
+from src.models.item import Item
 from src.repositories.item_repo import ItemRepository
 from src.repositories.practice_log_repo import PracticeLogRepository
 from src.schemas.practice import (
@@ -25,11 +27,7 @@ from src.schemas.practice import (
     PracticeSession,
     PracticeType,
 )
-from src.services.session_service import (
-    SessionService,
-    clear_session,
-    get_active_session,
-)
+from src.services.session_service import SessionService
 from src.templates.messages import (
     Messages,
     format_practice_answer_wrong,
@@ -59,6 +57,7 @@ class PracticeService:
         self.mode = mode
         self.item_repo = ItemRepository(session)
         self.practice_log_repo = PracticeLogRepository(session)
+        self.session_service = SessionService(session)
 
     async def create_session(
         self,
@@ -67,11 +66,11 @@ class PracticeService:
     ) -> tuple[PracticeSession | None, str]:
         """
         Create a new practice session for a user.
-        
+
         Args:
             user_id: User ID (hashed)
             question_count: Number of questions to generate
-            
+
         Returns:
             Tuple of (session, message) where session may be None if insufficient items
         """
@@ -109,7 +108,7 @@ class PracticeService:
         )
 
         # Store session (使用 SessionService 統一管理)
-        SessionService.set_session(user_id, practice_session)
+        await self.session_service.set_session(user_id, practice_session)
 
         return practice_session, practice_session.format_questions_message()
 
@@ -118,23 +117,15 @@ class PracticeService:
         user_id: str,
         count: int,
         criteria: ItemSelectionCriteria | None = None,
-    ) -> list:
+    ) -> list[Item]:
         """
         Select items for practice based on priority algorithm.
-        
+
         Priority order:
         1. Items added within 24 hours (new learning)
         2. Items with high error rate (>30%) in last 7 days
         3. Items not practiced in 7+ days (stale)
         4. Random selection from remaining
-        
-        Args:
-            user_id: User ID (hashed)
-            count: Number of items to select
-            criteria: Optional selection criteria
-            
-        Returns:
-            List of selected items
         """
         criteria = criteria or ItemSelectionCriteria()
         selected = []
@@ -208,17 +199,15 @@ class PracticeService:
         limit: int,
         days: int,
         min_rate: float,
-    ) -> list:
+    ) -> list[Item]:
         """Get items with high error rate."""
-        # Get items with error stats
         items_with_errors = await self.practice_log_repo.get_items_with_high_error_rate(
             user_id=user_id,
             days=days,
-            min_error_rate=min_rate,
+            threshold=min_rate,
             limit=limit,
         )
 
-        # Fetch full item records
         items = []
         for item_id in items_with_errors:
             item = await self.item_repo.get_by_id(item_id)
@@ -232,7 +221,7 @@ class PracticeService:
         user_id: str,
         limit: int,
         days: int,
-    ) -> list:
+    ) -> list[Item]:
         """Get items not practiced recently."""
         cutoff = datetime.now(UTC) - timedelta(days=days)
         return await self.item_repo.get_stale_by_user(
@@ -241,24 +230,33 @@ class PracticeService:
             limit=limit,
         )
 
-    def _generate_question(self, item) -> PracticeQuestion | None:
-        """
-        Generate a practice question for an item.
-        
-        Args:
-            item: Item model instance
-            
-        Returns:
-            PracticeQuestion or None if generation fails
+    def _generate_question(self, item: Item) -> PracticeQuestion | None:
+        """Generate a practice question for an item.
+
+        vocab 隨機選 VOCAB_RECALL 或 VOCAB_MEANING；
+        grammar 隨機選 GRAMMAR_CLOZE 或 GRAMMAR_USAGE。
+        若選中的 generator 回傳 None 則 fallback 到另一個。
         """
         question_id = str(uuid.uuid4())
         item_type = item.item_type
         payload = item.payload or {}
 
         if item_type == "vocab":
-            return self._generate_vocab_question(question_id, item, payload)
+            generators = [self._generate_vocab_question, self._generate_vocab_meaning_question]
+            random.shuffle(generators)
+            for gen in generators:
+                q = gen(question_id, item, payload)
+                if q:
+                    return q
+            return None
         elif item_type == "grammar":
-            return self._generate_grammar_question(question_id, item, payload)
+            generators = [self._generate_grammar_question, self._generate_grammar_usage_question]
+            random.shuffle(generators)
+            for gen in generators:
+                q = gen(question_id, item, payload)
+                if q:
+                    return q
+            return None
         else:
             logger.warning(f"Unknown item type: {item_type}")
             return None
@@ -271,7 +269,7 @@ class PracticeService:
     ) -> PracticeQuestion | None:
         """
         Generate vocabulary recall question.
-        
+
         Format: 「{meaning}」的日文是？
         """
         surface = payload.get("surface", "")
@@ -281,10 +279,7 @@ class PracticeService:
         if not surface or not glossary:
             return None
 
-        # Use first meaning for prompt
         meaning = glossary[0] if isinstance(glossary, list) else str(glossary)
-
-        # Expected answer is surface form (or reading)
         expected = surface
 
         hints = []
@@ -309,7 +304,7 @@ class PracticeService:
     ) -> PracticeQuestion | None:
         """
         Generate grammar cloze question.
-        
+
         Format: Fill in the blank with grammar pattern
         """
         pattern = payload.get("pattern", "")
@@ -319,14 +314,11 @@ class PracticeService:
         if not pattern or not meaning:
             return None
 
-        # Create cloze question
         if example and pattern in example:
-            # Create cloze by blanking out the pattern
             cloze = example.replace(pattern, "____")
             prompt = f"{cloze}\n（提示：{meaning}）"
             expected = pattern
         else:
-            # Fall back to direct question
             prompt = f"表示「{meaning}」的文法是？"
             expected = pattern
 
@@ -339,6 +331,66 @@ class PracticeService:
             item_key=item.key,
         )
 
+    def _generate_vocab_meaning_question(
+        self,
+        question_id: str,
+        item,
+        payload: dict,
+    ) -> PracticeQuestion | None:
+        """生成日→中詞義題。
+
+        Format: 「考える（かんがえる）」是什麼意思？
+        """
+        surface = payload.get("surface", "")
+        reading = payload.get("reading", "")
+        glossary = payload.get("glossary_zh", [])
+
+        if not surface or not glossary:
+            return None
+
+        meaning = glossary[0] if isinstance(glossary, list) else str(glossary)
+
+        # 提示文字：surface + reading（若不同）
+        prompt = surface
+        if reading and reading != surface:
+            prompt = f"{surface}（{reading}）"
+
+        return PracticeQuestion(
+            question_id=question_id,
+            item_id=str(item.item_id),
+            practice_type=PracticeType.VOCAB_MEANING,
+            prompt=prompt,
+            expected_answer=meaning,
+            item_key=item.key,
+        )
+
+    def _generate_grammar_usage_question(
+        self,
+        question_id: str,
+        item,
+        payload: dict,
+    ) -> PracticeQuestion | None:
+        """生成文法造句題。
+
+        Format: 請用「〜てみる」（嘗試做某事）造一個句子
+        """
+        pattern = payload.get("pattern", "")
+        meaning = payload.get("meaning_zh", "")
+
+        if not pattern or not meaning:
+            return None
+
+        prompt = f"請用「{pattern}」（{meaning}）造一個句子"
+
+        return PracticeQuestion(
+            question_id=question_id,
+            item_id=str(item.item_id),
+            practice_type=PracticeType.GRAMMAR_USAGE,
+            prompt=prompt,
+            expected_answer=pattern,
+            item_key=item.key,
+        )
+
     async def submit_answer(
         self,
         user_id: str,
@@ -346,30 +398,35 @@ class PracticeService:
     ) -> tuple[PracticeAnswer | None, str]:
         """
         Submit an answer for the current practice question.
-        
+
         Args:
             user_id: User ID (hashed)
             answer_text: User's answer
-            
+
         Returns:
             Tuple of (answer, message) where answer may be None if no active session
         """
-        session = get_active_session(user_id)
+        practice_session = await self.session_service.get_session(user_id)
 
-        if not session:
+        if not practice_session:
             return None, Messages.PRACTICE_NO_ACTIVE_SESSION
 
-        current_question = session.current_question
+        current_question = practice_session.current_question
         if not current_question:
-            # Session complete
-            session.is_complete = True
-            return None, session.format_result_message()
+            practice_session.is_complete = True
+            return None, practice_session.format_result_message()
 
-        # Grade answer
-        is_correct = is_correct_answer(
-            answer_text,
-            current_question.expected_answer
-        )
+        # Grade answer — GRAMMAR_USAGE 使用模糊判定（答案需包含 pattern）
+        if current_question.practice_type == PracticeType.GRAMMAR_USAGE:
+            is_correct = (
+                normalize_for_compare(current_question.expected_answer)
+                in normalize_for_compare(answer_text)
+            )
+        else:
+            is_correct = is_correct_answer(
+                answer_text,
+                current_question.expected_answer,
+            )
 
         # Create answer record
         practice_answer = PracticeAnswer(
@@ -380,7 +437,7 @@ class PracticeService:
         )
 
         # Record to session
-        session.answers.append({
+        practice_session.answers.append({
             "question_id": current_question.question_id,
             "item_id": current_question.item_id,
             "user_answer": answer_text,
@@ -388,7 +445,7 @@ class PracticeService:
         })
 
         # Record to database
-        await self.practice_log_repo.create(
+        await self.practice_log_repo.create_log(
             user_id=user_id,
             item_id=current_question.item_id,
             practice_type=current_question.practice_type.value,
@@ -398,24 +455,26 @@ class PracticeService:
         )
 
         # Move to next question
-        session.current_index += 1
+        practice_session.current_index += 1
 
         # Build response message
         feedback = practice_answer.format_feedback_message()
 
-        if session.current_index >= session.total_questions:
-            session.is_complete = True
-            feedback += "\n\n" + session.format_result_message()
-            clear_session(user_id)
+        if practice_session.current_index >= practice_session.total_questions:
+            practice_session.is_complete = True
+            feedback += "\n\n" + practice_session.format_result_message()
+            await self.session_service.clear_session(user_id)
         else:
-            next_q = session.current_question
+            # 更新 session state 到 DB
+            await self.session_service.update_session(user_id, practice_session)
+            next_q = practice_session.current_question
             if next_q:
-                feedback += f"\n\n下一題：\n{next_q.format_for_display(session.current_index + 1)}"
+                feedback += f"\n\n下一題：\n{next_q.format_for_display(practice_session.current_index + 1)}"
 
         return practice_answer, feedback
 
 
-# 快速檢查函數（經由 session_service 實作）
-def has_active_session(user_id: str) -> bool:
-    """檢查用戶是否有進行中的練習 session。"""
-    return get_active_session(user_id) is not None
+async def has_active_session(db_session: AsyncSession, user_id: str) -> bool:
+    """檢查用戶是否有進行中的練習 session（需要 DB session）。"""
+    svc = SessionService(db_session)
+    return await svc.has_active_session(user_id)

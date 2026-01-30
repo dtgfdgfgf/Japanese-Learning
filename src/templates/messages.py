@@ -102,6 +102,16 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "QUESTION_VOCAB_RECALL": "{index}. 「{prompt}」的日文是？",
     "QUESTION_GRAMMAR_CLOZE": "{index}. {prompt}",
     "QUESTION_VOCAB_MEANING": "{index}. 「{prompt}」是什麼意思？",
+    "QUESTION_GRAMMAR_USAGE": "{index}. {prompt}",
+
+    # ========== 統計相關 ==========
+    "STATS_SUMMARY": (
+        "📊 學習進度\n\n"
+        "📦 素材庫：{total_items} 項（單字 {total_vocab} / 文法 {total_grammar}）\n\n"
+        "✏️ 練習紀錄：{total_practice} 題（正確率 {correct_rate}%）\n\n"
+        "📅 近 7 日：{recent_practice} 題（正確率 {recent_rate}%）"
+    ),
+    "STATS_EMPTY": "📊 尚無學習紀錄\n\n先入庫一些日文內容，再開始練習吧！",
     
     # ========== 刪除相關 ==========
     "DELETE_NOTHING": "沒有可刪除的資料 📭",
@@ -138,6 +148,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 • 分析 - 分析已入庫的內容，抽取單字/文法
 • 練習 - 開始練習題
 • 查詢 <關鍵字> - 搜尋已入庫的內容
+• 統計 - 查看學習進度
 • 用量 - 查看 API 使用量與費用
 • 免費模式/便宜模式/嚴謹模式 - 切換 LLM 模式
 • 刪除最後一筆 - 刪除最近一筆入庫
@@ -528,6 +539,30 @@ def format_mode_switch_confirm(mode: str) -> str:
     """格式化模式切換確認訊息。"""
     mode_label = MODE_LABELS.get(mode, mode)
     return Messages.format("MODE_SWITCH_CONFIRM", mode_label=mode_label)
+
+
+def format_stats_summary(
+    total_vocab: int,
+    total_grammar: int,
+    total_practice: int,
+    correct_rate: int,
+    recent_practice: int,
+    recent_rate: int,
+) -> str:
+    """格式化學習進度統計訊息。"""
+    total_items = total_vocab + total_grammar
+    if total_items == 0 and total_practice == 0:
+        return _MESSAGES_ZH_TW["STATS_EMPTY"]
+    return Messages.format(
+        "STATS_SUMMARY",
+        total_items=total_items,
+        total_vocab=total_vocab,
+        total_grammar=total_grammar,
+        total_practice=total_practice,
+        correct_rate=correct_rate,
+        recent_practice=recent_practice,
+        recent_rate=recent_rate,
+    )
 
 
 def format_cost_summary(

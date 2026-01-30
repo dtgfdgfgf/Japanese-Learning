@@ -6,7 +6,6 @@ T071: Implement "清空資料" with confirmation state
 """
 
 import logging
-from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,56 +24,13 @@ from src.templates.messages import (
 
 logger = logging.getLogger(__name__)
 
-# Store confirmation states (user_id -> timestamp)
-_confirmation_pending: dict[str, datetime] = {}
-
-# Confirmation timeout in seconds
-CONFIRMATION_TIMEOUT = 60
-
-
-def is_confirmation_pending(user_id: str) -> bool:
-    """檢查使用者是否有待確認的清空請求。
-    
-    Args:
-        user_id: Hashed user ID
-        
-    Returns:
-        True if confirmation is pending and not expired
-    """
-    pending_time = _confirmation_pending.get(user_id)
-
-    if not pending_time:
-        return False
-
-    elapsed = (datetime.now(UTC) - pending_time).total_seconds()
-    if elapsed > CONFIRMATION_TIMEOUT:
-        # Expired
-        del _confirmation_pending[user_id]
-        return False
-
-    return True
-
-
-def request_clear_all(user_id: str) -> str:
-    """請求清空所有資料 - 設置待確認狀態（不需要 DB session）。
-    
-    Args:
-        user_id: Hashed user ID
-        
-    Returns:
-        Confirmation prompt message
-    """
-    _confirmation_pending[user_id] = datetime.now(UTC)
-
-    return Messages.DELETE_CONFIRM_PROMPT
-
 
 class DeleteService:
     """Service for managing data deletion operations."""
 
     def __init__(self, session: AsyncSession):
         """Initialize DeleteService.
-        
+
         Args:
             session: Database session
         """
@@ -85,10 +41,10 @@ class DeleteService:
 
     async def delete_last(self, user_id: str) -> tuple[int, str]:
         """Delete the most recently created raw message, its document, and associated items.
-        
+
         Args:
             user_id: Hashed user ID
-            
+
         Returns:
             Tuple of (count deleted, message)
         """
@@ -153,50 +109,16 @@ class DeleteService:
         await self.session.flush()
         return result.rowcount
 
-    def check_confirmation_pending(self, user_id: str) -> bool:
-        """Check if user has pending clear confirmation.
-        
-        Args:
-            user_id: Hashed user ID
-            
-        Returns:
-            True if confirmation is pending and not expired
-        """
-        pending_time = _confirmation_pending.get(user_id)
-
-        if not pending_time:
-            return False
-
-        elapsed = (datetime.now(UTC) - pending_time).total_seconds()
-        if elapsed > CONFIRMATION_TIMEOUT:
-            # Expired
-            del _confirmation_pending[user_id]
-            return False
-
-        return True
-
-    def clear_confirmation(self, user_id: str) -> None:
-        """Clear pending confirmation for user."""
-        _confirmation_pending.pop(user_id, None)
-
     async def clear_all_data(self, user_id: str) -> tuple[int, str]:
         """Clear all data for a user (soft delete).
-        
+
         Args:
             user_id: Hashed user ID
-            
+
         Returns:
             Tuple of (count deleted, message)
         """
-        # Clear confirmation state
-        self.clear_confirmation(user_id)
-
         deleted_count = 0
-
-        # Count items before deletion
-        item_count = await self._count_items(user_id)
-        doc_count = await self._count_docs(user_id)
-        raw_count = await self._count_raws(user_id)
 
         # Soft delete all items
         items_deleted = await self._soft_delete_all_items(user_id)
@@ -279,18 +201,3 @@ class DeleteService:
         result = await self.session.execute(stmt)
         await self.session.flush()
         return result.rowcount
-
-
-def is_confirmation_pending(user_id: str) -> bool:
-    """檢查用戶是否有待確認的清空請求（module-level function）。"""
-    pending_time = _confirmation_pending.get(user_id)
-
-    if not pending_time:
-        return False
-
-    elapsed = (datetime.now(UTC) - pending_time).total_seconds()
-    if elapsed > CONFIRMATION_TIMEOUT:
-        del _confirmation_pending[user_id]
-        return False
-
-    return True

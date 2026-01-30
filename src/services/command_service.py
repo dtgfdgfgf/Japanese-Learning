@@ -34,6 +34,7 @@ COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     (r"^隱私$", CommandType.PRIVACY, False),
     (r"^(說明|幫助|help)$", CommandType.HELP, False),
     (r"^(用量|cost)$", CommandType.COST, False),
+    (r"^(統計|進度)$", CommandType.STATS, False),
     (r"^切換(免費|便宜|嚴謹)$", CommandType.MODE_SWITCH, True),
     (r"^(免費模式|便宜模式|嚴謹模式)$", CommandType.MODE_SWITCH, True),
 ]

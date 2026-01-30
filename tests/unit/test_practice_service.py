@@ -229,6 +229,180 @@ class TestPracticeAnswer:
         assert "考える" in feedback
 
 
+class TestVocabMeaningQuestion:
+    """Tests for VOCAB_MEANING question generation."""
+
+    def test_generate_vocab_meaning_question(self):
+        """日→中詞義題：prompt 為日文 surface，expected 為中文釋義。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "vocab"
+        mock_item.key = "vocab:考える"
+        mock_item.payload = {
+            "surface": "考える",
+            "reading": "かんがえる",
+            "glossary_zh": ["思考", "考慮"],
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, session: None):
+            service = PracticeService.__new__(PracticeService)
+            question = service._generate_vocab_meaning_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is not None
+            assert question.practice_type == PracticeType.VOCAB_MEANING
+            assert question.expected_answer == "思考"
+            assert "考える" in question.prompt
+            assert "かんがえる" in question.prompt
+
+    def test_vocab_meaning_same_reading(self):
+        """reading 與 surface 相同時，prompt 不重複顯示。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "vocab"
+        mock_item.key = "vocab:すごい"
+        mock_item.payload = {
+            "surface": "すごい",
+            "reading": "すごい",
+            "glossary_zh": ["厲害"],
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, session: None):
+            service = PracticeService.__new__(PracticeService)
+            question = service._generate_vocab_meaning_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is not None
+            assert question.prompt == "すごい"
+            assert "（" not in question.prompt
+
+
+class TestGrammarUsageQuestion:
+    """Tests for GRAMMAR_USAGE question generation."""
+
+    def test_generate_grammar_usage_question(self):
+        """文法造句題：prompt 包含 pattern 與 meaning。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "grammar"
+        mock_item.key = "grammar:〜てみる"
+        mock_item.payload = {
+            "pattern": "〜てみる",
+            "meaning_zh": "嘗試做某事",
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, session: None):
+            service = PracticeService.__new__(PracticeService)
+            question = service._generate_grammar_usage_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is not None
+            assert question.practice_type == PracticeType.GRAMMAR_USAGE
+            assert "〜てみる" in question.prompt
+            assert "嘗試做某事" in question.prompt
+            assert question.expected_answer == "〜てみる"
+
+    def test_grammar_usage_missing_meaning(self):
+        """缺少 meaning_zh 時回傳 None。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.payload = {"pattern": "〜てみる"}
+
+        with patch.object(PracticeService, "__init__", lambda self, session: None):
+            service = PracticeService.__new__(PracticeService)
+            question = service._generate_grammar_usage_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is None
+
+
+class TestFuzzyGrading:
+    """Tests for GRAMMAR_USAGE fuzzy grading."""
+
+    def test_grammar_usage_correct_contains_pattern(self):
+        """回答包含 pattern 時判定正確。"""
+        from src.lib.normalizer import normalize_for_compare
+
+        # 使用不含 〜 前綴的 pattern，模擬實際 payload
+        pattern = "てみる"
+        answer = "日本料理を作ってみる"
+        assert normalize_for_compare(pattern) in normalize_for_compare(answer)
+
+    def test_grammar_usage_wrong_no_pattern(self):
+        """回答不包含 pattern 時判定錯誤。"""
+        from src.lib.normalizer import normalize_for_compare
+
+        pattern = "〜てみる"
+        answer = "日本料理を作った"
+        assert normalize_for_compare(pattern) not in normalize_for_compare(answer)
+
+
+class TestRandomQuestionType:
+    """Tests for random question type selection."""
+
+    def test_vocab_generates_either_type(self):
+        """vocab item 應產生 VOCAB_RECALL 或 VOCAB_MEANING。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "vocab"
+        mock_item.key = "vocab:考える"
+        mock_item.payload = {
+            "surface": "考える",
+            "reading": "かんがえる",
+            "glossary_zh": ["思考"],
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, session: None):
+            service = PracticeService.__new__(PracticeService)
+            types_seen = set()
+            for _ in range(50):
+                q = service._generate_question(mock_item)
+                assert q is not None
+                types_seen.add(q.practice_type)
+
+            assert PracticeType.VOCAB_RECALL in types_seen
+            assert PracticeType.VOCAB_MEANING in types_seen
+
+    def test_grammar_generates_either_type(self):
+        """grammar item 應產生 GRAMMAR_CLOZE 或 GRAMMAR_USAGE。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "grammar"
+        mock_item.key = "grammar:〜てみる"
+        mock_item.payload = {
+            "pattern": "〜てみる",
+            "meaning_zh": "嘗試做某事",
+            "example": "新しいレストランに行ってみたい",
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, session: None):
+            service = PracticeService.__new__(PracticeService)
+            types_seen = set()
+            for _ in range(50):
+                q = service._generate_question(mock_item)
+                assert q is not None
+                types_seen.add(q.practice_type)
+
+            assert PracticeType.GRAMMAR_CLOZE in types_seen
+            assert PracticeType.GRAMMAR_USAGE in types_seen
+
+
 class TestPracticeServiceSelection:
     """Tests for item selection algorithm in PracticeService."""
     
@@ -290,9 +464,9 @@ class TestQuestionGeneration:
     """Tests for question generation."""
     
     def test_generate_vocab_question(self):
-        """Test generating vocab recall question."""
+        """Test generating vocab question (RECALL or MEANING)."""
         from src.services.practice_service import PracticeService
-        
+
         mock_item = MagicMock()
         mock_item.item_id = str(uuid.uuid4())
         mock_item.item_type = "vocab"
@@ -302,21 +476,19 @@ class TestQuestionGeneration:
             "reading": "かんがえる",
             "glossary_zh": ["思考", "考慮"],
         }
-        
+
         with patch.object(PracticeService, "__init__", lambda self, session: None):
             service = PracticeService.__new__(PracticeService)
-            
+
             question = service._generate_question(mock_item)
-            
+
             assert question is not None
-            assert question.practice_type == PracticeType.VOCAB_RECALL
-            assert question.expected_answer == "考える"
-            assert "思考" in question.prompt
-    
+            assert question.practice_type in (PracticeType.VOCAB_RECALL, PracticeType.VOCAB_MEANING)
+
     def test_generate_grammar_question(self):
-        """Test generating grammar cloze question."""
+        """Test generating grammar question (CLOZE or USAGE)."""
         from src.services.practice_service import PracticeService
-        
+
         mock_item = MagicMock()
         mock_item.item_id = str(uuid.uuid4())
         mock_item.item_type = "grammar"
@@ -326,11 +498,11 @@ class TestQuestionGeneration:
             "meaning_zh": "嘗試做某事",
             "example": "新しいレストランに行ってみたい",
         }
-        
+
         with patch.object(PracticeService, "__init__", lambda self, session: None):
             service = PracticeService.__new__(PracticeService)
-            
+
             question = service._generate_question(mock_item)
-            
+
             assert question is not None
-            assert question.practice_type == PracticeType.GRAMMAR_CLOZE
+            assert question.practice_type in (PracticeType.GRAMMAR_CLOZE, PracticeType.GRAMMAR_USAGE)

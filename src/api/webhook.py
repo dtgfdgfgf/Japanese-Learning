@@ -26,6 +26,7 @@ from src.lib.llm_client import UsageContext, usage_context_var
 from src.lib.security import hash_user_id
 from src.models.item import Item
 from src.repositories.user_profile_repo import UserProfileRepository
+from src.repositories.user_state_repo import UserStateRepository
 from src.schemas.command import CommandType, ParsedCommand
 from src.services.command_service import MODE_NAME_MAP, CommandService, parse_command
 from src.services.practice_service import has_active_session
@@ -60,10 +61,6 @@ LOG_TRUNCATE_LENGTH = 50
 # LINE 訊息長度上限（預留 footer 空間）
 LINE_MESSAGE_MAX_LENGTH = 5000
 FOOTER_RESERVE = 300
-
-# Store last message per user for "入庫" context (in-memory for MVP)
-_user_last_message: dict[str, str] = {}
-
 
 # ============================================================================
 # Main Webhook Handler
@@ -115,48 +112,58 @@ async def handle_message_event(event: MessageEvent) -> None:
         logger.warning("Missing user_id or reply_token")
         return
 
-    logger.info(
-        f"Received message from {user_id[:8]}...: {text[:LOG_TRUNCATE_LENGTH]}..."
-    )
-
     hashed_uid = hash_user_id(user_id)
+
+    logger.info(
+        f"Received message from {hashed_uid[:8]}...: {text[:LOG_TRUNCATE_LENGTH]}..."
+    )
 
     # 建立 UsageContext 追蹤本次 token 使用量
     usage_ctx = UsageContext()
     token = usage_context_var.set(usage_ctx)
 
     try:
-        # 取得 user profile（含日切重置）— 失敗時使用預設值
+        # === Pre-dispatch session：讀取 profile + 檢查 session + 模式切換 ===
         current_mode = "free"
         daily_used = 0
         daily_cap = 50000
-        try:
-            async with get_session() as profile_session:
-                profile_repo = UserProfileRepository(profile_session)
-                profile = await profile_repo.get_or_create(hashed_uid)
-                current_mode = profile.mode or "free"
-                daily_used = profile.daily_used_tokens or 0
-                daily_cap = profile.daily_cap_tokens_free or 50000
-        except Exception as e:
-            logger.warning(f"Failed to load user profile, using defaults: {e}")
-
-        # 解析指令
         parsed = parse_command(text)
+        has_session = False
+        try:
+            async with get_session() as session:
+                # 讀取 profile（失敗不影響後續操作）
+                try:
+                    profile_repo = UserProfileRepository(session)
+                    profile = await profile_repo.get_or_create(hashed_uid)
+                    current_mode = profile.mode or "free"
+                    daily_used = profile.daily_used_tokens or 0
+                    daily_cap = profile.daily_cap_tokens_free or 50000
+                except Exception as e:
+                    logger.warning(f"Failed to load user profile, using defaults: {e}")
 
-        # 練習 session 中的答案處理
-        if parsed.command_type == CommandType.UNKNOWN and has_active_session(hashed_uid):
-            response = await _handle_practice_answer(hashed_uid, text)
+                # 練習 session 中的答案處理（需查 DB）
+                if parsed.command_type == CommandType.UNKNOWN:
+                    has_session = await has_active_session(session, hashed_uid)
+
+                # 模式切換需在 reply 前完成
+                if parsed.command_type == CommandType.MODE_SWITCH:
+                    mode_key = _resolve_mode_key(parsed)
+                    if mode_key:
+                        try:
+                            profile_repo = UserProfileRepository(session)
+                            profile = await profile_repo.set_mode(hashed_uid, mode_key)
+                            current_mode = profile.mode
+                        except Exception as e:
+                            logger.warning(f"Failed to set mode: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to open pre-dispatch session: {e}")
+
+        # === Dispatch ===
+        if parsed.command_type == CommandType.UNKNOWN and has_session:
+            response = await _handle_practice_answer(hashed_uid, text, current_mode)
         elif parsed.command_type == CommandType.MODE_SWITCH:
-            # 模式切換
             mode_key = _resolve_mode_key(parsed)
             if mode_key:
-                try:
-                    async with get_session() as session:
-                        repo = UserProfileRepository(session)
-                        profile = await repo.set_mode(hashed_uid, mode_key)
-                        current_mode = profile.mode
-                except Exception as e:
-                    logger.warning(f"Failed to set mode: {e}")
                 response = format_mode_switch_confirm(mode_key)
             else:
                 response = Messages.FALLBACK_UNKNOWN
@@ -168,16 +175,21 @@ async def handle_message_event(event: MessageEvent) -> None:
                 mode=current_mode,
             )
 
-        # 累加本次 token 使用量到 user profile
+        # === Post-dispatch session：累加 token + 儲存 last_message ===
         total_tokens = usage_ctx.total_tokens
-        if total_tokens > 0:
+        need_save_last_msg = parsed.command_type == CommandType.UNKNOWN and not has_session
+        if total_tokens > 0 or need_save_last_msg:
             try:
                 async with get_session() as session:
-                    repo = UserProfileRepository(session)
-                    profile = await repo.add_tokens(hashed_uid, total_tokens)
-                    daily_used = profile.daily_used_tokens
+                    if total_tokens > 0:
+                        repo = UserProfileRepository(session)
+                        profile = await repo.add_tokens(hashed_uid, total_tokens)
+                        daily_used = profile.daily_used_tokens
+                    if need_save_last_msg:
+                        user_state_repo = UserStateRepository(session)
+                        await user_state_repo.set_last_message(hashed_uid, text)
             except Exception as e:
-                logger.warning(f"Failed to update token usage: {e}")
+                logger.warning(f"Failed in post-dispatch session: {e}")
 
         # 組裝 footer
         footer = format_usage_footer(
@@ -198,10 +210,6 @@ async def handle_message_event(event: MessageEvent) -> None:
         # 使用 Quick Reply 發送
         quick_reply = build_mode_quick_replies(current_mode)
         await line_client.reply_with_quick_reply(reply_token, full_response, quick_reply)
-
-        # 儲存訊息供「入庫」使用
-        if parsed.command_type == CommandType.UNKNOWN and not has_active_session(hashed_uid):
-            _user_last_message[user_id] = text
 
     except Exception as e:
         # 最後防線：確保使用者至少收到回覆
@@ -310,10 +318,13 @@ async def _dispatch_command(
         return await _handle_delete_last(line_user_id)
 
     if command_type == CommandType.DELETE_ALL:
-        return _handle_delete_all_request(line_user_id)
+        return await _handle_delete_all_request(line_user_id)
 
     if command_type == CommandType.COST:
         return await _handle_cost(line_user_id)
+
+    if command_type == CommandType.STATS:
+        return await _handle_stats(line_user_id)
 
     if command_type == CommandType.DELETE_CONFIRM:
         return await _handle_delete_confirm(line_user_id)
@@ -323,19 +334,23 @@ async def _dispatch_command(
 
 async def _handle_save(line_user_id: str) -> str:
     """處理入庫指令。"""
-    previous_content = _user_last_message.get(line_user_id)
-
-    if not previous_content:
-        return Messages.SAVE_NO_CONTENT
+    hashed_uid = hash_user_id(line_user_id)
 
     async with get_session() as session:
+        user_state_repo = UserStateRepository(session)
+        previous_content = await user_state_repo.get_last_message(hashed_uid)
+
+        if not previous_content:
+            return Messages.SAVE_NO_CONTENT
+
         service = CommandService(session)
         result = await service.save_raw(
             line_user_id=line_user_id,
             content_text=previous_content,
         )
 
-    _user_last_message.pop(line_user_id, None)
+        await user_state_repo.clear_last_message(hashed_uid)
+
     return result.message
 
 
@@ -435,12 +450,27 @@ async def _handle_cost(line_user_id: str) -> str:
             return Messages.ERROR_GENERIC
 
 
-async def _handle_practice_answer(hashed_user_id: str, answer_text: str) -> str:
+async def _handle_stats(line_user_id: str) -> str:
+    """處理統計指令。"""
+    async with get_session() as session:
+        from src.services.stats_service import StatsService
+
+        stats_service = StatsService(session)
+
+        try:
+            result = await stats_service.get_stats_summary(hash_user_id(line_user_id))
+            return result.message
+        except Exception as e:
+            logger.error(f"Stats query failed: {e}")
+            return Messages.ERROR_GENERIC
+
+
+async def _handle_practice_answer(hashed_user_id: str, answer_text: str, mode: str = "free") -> str:
     """處理練習答案提交。"""
     async with get_session() as session:
         from src.services.practice_service import PracticeService
 
-        practice_service = PracticeService(session)
+        practice_service = PracticeService(session, mode=mode)
 
         try:
             _, message = await practice_service.submit_answer(
@@ -471,27 +501,34 @@ async def _handle_delete_last(line_user_id: str) -> str:
             return Messages.ERROR_DELETE
 
 
-def _handle_delete_all_request(line_user_id: str) -> str:
+async def _handle_delete_all_request(line_user_id: str) -> str:
     """處理清空資料請求（設置確認狀態）。"""
-    from src.services.delete_service import request_clear_all
-
     hashed_user_id = hash_user_id(line_user_id)
-    return request_clear_all(hashed_user_id)
+
+    async with get_session() as session:
+        user_state_repo = UserStateRepository(session)
+        await user_state_repo.set_delete_confirm_at(hashed_user_id)
+
+    return Messages.DELETE_CONFIRM_PROMPT
 
 
 async def _handle_delete_confirm(line_user_id: str) -> str:
     """處理確認清空資料指令。"""
-    from src.services.delete_service import DeleteService, is_confirmation_pending
+    from src.services.delete_service import DeleteService
 
     hashed_user_id = hash_user_id(line_user_id)
 
-    if not is_confirmation_pending(hashed_user_id):
-        return Messages.DELETE_CONFIRM_NOT_PENDING
-
     async with get_session() as session:
+        user_state_repo = UserStateRepository(session)
+        is_pending = await user_state_repo.is_delete_confirmation_pending(hashed_user_id)
+
+        if not is_pending:
+            return Messages.DELETE_CONFIRM_NOT_PENDING
+
         delete_service = DeleteService(session)
 
         try:
+            await user_state_repo.clear_delete_confirm(hashed_user_id)
             _, message = await delete_service.clear_all_data(hashed_user_id)
             await session.commit()
             return message

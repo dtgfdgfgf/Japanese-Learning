@@ -77,6 +77,7 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
         stmt = (
             select(PracticeLog)
             .where(PracticeLog.item_id == item_id)
+            .where(PracticeLog.is_deleted.is_(False))
             .order_by(PracticeLog.created_at.desc())
             .limit(limit)
         )
@@ -103,12 +104,13 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
         stmt = (
             select(PracticeLog)
             .where(PracticeLog.user_id == user_id)
-            .order_by(PracticeLog.created_at.desc())
-            .limit(limit)
+            .where(PracticeLog.is_deleted.is_(False))
         )
 
         if practice_type:
             stmt = stmt.where(PracticeLog.practice_type == practice_type)
+
+        stmt = stmt.order_by(PracticeLog.created_at.desc()).limit(limit)
 
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -134,6 +136,7 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
             select(func.count())
             .select_from(PracticeLog)
             .where(PracticeLog.item_id == item_id)
+            .where(PracticeLog.is_deleted.is_(False))
             .where(PracticeLog.created_at >= cutoff)
         )
 
@@ -141,6 +144,7 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
             select(func.count())
             .select_from(PracticeLog)
             .where(PracticeLog.item_id == item_id)
+            .where(PracticeLog.is_deleted.is_(False))
             .where(PracticeLog.created_at >= cutoff)
             .where(PracticeLog.is_correct.is_(False))
         )
@@ -186,6 +190,7 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
                 ).label("error_rate"),
             )
             .where(PracticeLog.user_id == user_id)
+            .where(PracticeLog.is_deleted.is_(False))
             .where(PracticeLog.created_at >= cutoff)
             .group_by(PracticeLog.item_id)
             .having(
@@ -204,6 +209,38 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
 
         result = await self.session.execute(stmt)
         return [row[0] for row in result.all()]
+
+    async def count_by_user_since(
+        self,
+        user_id: str,
+        since: datetime,
+        correct_only: bool | None = None,
+    ) -> int:
+        """Count practice logs for a user since a given time.
+
+        Args:
+            user_id: Hashed LINE user ID
+            since: 起算時間點
+            correct_only: If True, count only correct; if False, only incorrect; if None, all
+
+        Returns:
+            Count of practice logs
+        """
+        stmt = (
+            select(func.count())
+            .select_from(PracticeLog)
+            .where(PracticeLog.user_id == user_id)
+            .where(PracticeLog.is_deleted.is_(False))
+            .where(PracticeLog.created_at >= since)
+        )
+
+        if correct_only is True:
+            stmt = stmt.where(PracticeLog.is_correct.is_(True))
+        elif correct_only is False:
+            stmt = stmt.where(PracticeLog.is_correct.is_(False))
+
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
 
     async def count_by_user(
         self,
@@ -224,6 +261,7 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
             select(func.count())
             .select_from(PracticeLog)
             .where(PracticeLog.user_id == user_id)
+            .where(PracticeLog.is_deleted.is_(False))
         )
 
         if correct_only is True:
