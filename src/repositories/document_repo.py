@@ -111,9 +111,7 @@ class DocumentRepository(BaseRepository[Document]):
         if not include_deleted:
             stmt = stmt.where(Document.is_deleted.is_(False))
 
-        stmt = stmt.limit(limit
-            .limit(limit)
-        )
+        stmt = stmt.limit(limit)
 
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -171,6 +169,9 @@ class DocumentRepository(BaseRepository[Document]):
         Returns:
             Document if found, None otherwise
         """
-        stmt = select(Document).where(Document.raw_id == raw_id)
+        stmt = select(Document).where(
+            Document.raw_id == raw_id,
+            Document.is_deleted.is_(False),
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()

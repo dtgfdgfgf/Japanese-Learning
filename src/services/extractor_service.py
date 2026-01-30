@@ -9,7 +9,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.lib.llm_client import LLMClient, LLMTrace
+from src.lib.llm_client import LLMClient, LLMTrace, get_llm_client
 from src.lib.normalizer import detect_language
 from src.prompts.extractor import format_extractor_request, get_system_prompt
 from src.repositories.api_usage_log_repo import ApiUsageLogRepository
@@ -46,7 +46,7 @@ class ExtractorService:
             llm_client: Optional LLM client (creates new one if not provided)
         """
         self.session = session
-        self.llm_client = llm_client or LLMClient()
+        self.llm_client = llm_client or get_llm_client()
         self.raw_message_repo = RawMessageRepository(session)
         self.document_repo = DocumentRepository(session)
         self.item_repo = ItemRepository(session)
@@ -122,7 +122,7 @@ class ExtractorService:
             return ExtractorResponse(
                 doc_id=doc_id,
                 items=[],
-                warnings=[f"Extraction failed: {str(e)}"],
+                warnings=[f"Extraction failed: {type(e).__name__}"],
             )
 
         # Save items to database

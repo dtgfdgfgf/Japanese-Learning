@@ -46,7 +46,10 @@ class BaseRepository(Generic[ModelT]):
             Entity if found, None otherwise
         """
         pk_column = getattr(self.model, self.pk_field)
-        stmt = select(self.model).where(pk_column == str(id_value))
+        stmt = select(self.model).where(
+            pk_column == str(id_value),
+            self.model.is_deleted.is_(False),
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -79,6 +82,7 @@ class BaseRepository(Generic[ModelT]):
         stmt = (
             update(self.model)
             .where(pk_column == str(id_value))
+            .where(self.model.is_deleted.is_(False))
             .values(**kwargs)
             .returning(self.model)
         )
@@ -99,6 +103,7 @@ class BaseRepository(Generic[ModelT]):
         stmt = (
             update(self.model)
             .where(pk_column == str(id_value))
+            .where(self.model.is_deleted.is_(False))
             .values(is_deleted=True)
         )
         result = await self.session.execute(stmt)

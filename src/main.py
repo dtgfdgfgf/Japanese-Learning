@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.middleware import RequestIdMiddleware
 from src.api.webhook import router as webhook_router
 from src.config import settings
 from src.database import close_db, init_db
@@ -62,6 +63,9 @@ app = FastAPI(
     docs_url="/docs" if settings.is_development else None,
     redoc_url="/redoc" if settings.is_development else None,
 )
+
+# Add request ID middleware
+app.add_middleware(RequestIdMiddleware)
 
 # Add CORS middleware
 # 注意：allow_origins=["*"] 僅在 development 環境使用

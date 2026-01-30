@@ -187,7 +187,9 @@ async def handle_message_event(event: MessageEvent) -> None:
                         daily_used = profile.daily_used_tokens
                     if need_save_last_msg:
                         user_state_repo = UserStateRepository(session)
-                        await user_state_repo.set_last_message(hashed_uid, text)
+                        # 截斷過長訊息，避免 DB 儲存巨大 payload
+                        truncated_text = text[:5000] if len(text) > 5000 else text
+                        await user_state_repo.set_last_message(hashed_uid, truncated_text)
             except Exception as e:
                 logger.warning(f"Failed in post-dispatch session: {e}")
 
@@ -494,7 +496,6 @@ async def _handle_delete_last(line_user_id: str) -> str:
 
         try:
             _, message = await delete_service.delete_last(hashed_user_id)
-            await session.commit()
             return message
         except Exception as e:
             logger.error(f"Delete last failed: {e}")
@@ -530,7 +531,6 @@ async def _handle_delete_confirm(line_user_id: str) -> str:
         try:
             await user_state_repo.clear_delete_confirm(hashed_user_id)
             _, message = await delete_service.clear_all_data(hashed_user_id)
-            await session.commit()
             return message
         except Exception as e:
             logger.error(f"Clear all failed: {e}")

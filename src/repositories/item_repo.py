@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.item import Item
@@ -85,7 +86,7 @@ class ItemRepository(BaseRepository[Item]):
         Returns:
             Tuple of (Item instance, was_created boolean)
         """
-        # Check if item exists
+        # 先查後寫，搭配 IntegrityError retry 防止並發 race condition
         existing = await self.get_by_unique_key(user_id, item_type, key)
 
         if existing:
@@ -98,8 +99,8 @@ class ItemRepository(BaseRepository[Item]):
                 doc_id=doc_id,  # Update doc reference to latest
             )
             return updated or existing, False
-        else:
-            # Create new item
+
+        try:
             item = await self.create_item(
                 user_id=user_id,
                 doc_id=doc_id,
@@ -110,6 +111,20 @@ class ItemRepository(BaseRepository[Item]):
                 confidence=confidence,
             )
             return item, True
+        except IntegrityError:
+            # 並發插入衝突：回滾後重新查詢並更新
+            await self.session.rollback()
+            existing = await self.get_by_unique_key(user_id, item_type, key)
+            if existing:
+                updated = await self.update(
+                    existing.item_id,
+                    payload=payload,
+                    confidence=confidence,
+                    source_quote=source_quote,
+                    doc_id=doc_id,
+                )
+                return updated or existing, False
+            raise
 
     async def get_by_unique_key(
         self,
@@ -322,7 +337,12 @@ class ItemRepository(BaseRepository[Item]):
         Returns:
             Number of items deleted
         """
-        stmt = update(Item).where(Item.doc_id == doc_id).values(is_deleted=True)
+        stmt = (
+            update(Item)
+            .where(Item.doc_id == doc_id)
+            .where(Item.is_deleted.is_(False))
+            .values(is_deleted=True)
+        )
         result = await self.session.execute(stmt)
         await self.session.flush()
         return result.rowcount

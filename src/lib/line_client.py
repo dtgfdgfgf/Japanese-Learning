@@ -4,6 +4,7 @@ T022: Create LINE client wrapper in src/lib/line_client.py
 DoD: reply_message(reply_token, text) 可送出回覆；signature 驗證方法可用
 """
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -98,14 +99,17 @@ class LineClient:
             True if message was sent successfully, False otherwise
         """
         try:
-            with ApiClient(self.configuration) as api_client:
-                api = MessagingApi(api_client)
-                api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=reply_token,
-                        messages=[TextMessage(text=text)],
+            def _sync_reply() -> None:
+                with ApiClient(self.configuration) as api_client:
+                    api = MessagingApi(api_client)
+                    api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[TextMessage(text=text)],
+                        )
                     )
-                )
+
+            await asyncio.to_thread(_sync_reply)
             logger.debug(f"Sent reply: {text[:50]}...")
             return True
         except Exception as e:
@@ -133,14 +137,17 @@ class LineClient:
         texts = texts[:5]
 
         try:
-            with ApiClient(self.configuration) as api_client:
-                api = MessagingApi(api_client)
-                api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=reply_token,
-                        messages=[TextMessage(text=t) for t in texts],
+            def _sync_reply() -> None:
+                with ApiClient(self.configuration) as api_client:
+                    api = MessagingApi(api_client)
+                    api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[TextMessage(text=t) for t in texts],
+                        )
                     )
-                )
+
+            await asyncio.to_thread(_sync_reply)
             logger.debug(f"Sent {len(texts)} replies")
             return True
         except Exception as e:
@@ -205,16 +212,19 @@ class LineClient:
             True if sent successfully
         """
         try:
-            with ApiClient(self.configuration) as api_client:
-                api = MessagingApi(api_client)
-                api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=reply_token,
-                        messages=[
-                            TextMessage(text=text, quick_reply=quick_reply),
-                        ],
+            def _sync_reply() -> None:
+                with ApiClient(self.configuration) as api_client:
+                    api = MessagingApi(api_client)
+                    api.reply_message(
+                        ReplyMessageRequest(
+                            reply_token=reply_token,
+                            messages=[
+                                TextMessage(text=text, quick_reply=quick_reply),
+                            ],
+                        )
                     )
-                )
+
+            await asyncio.to_thread(_sync_reply)
             logger.debug(f"Sent reply with quick_reply: {text[:50]}...")
             return True
         except Exception as e:

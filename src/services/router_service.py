@@ -66,7 +66,7 @@ class RouterService:
             return RouterResponse(
                 intent=IntentType.UNKNOWN,
                 confidence=0.0,
-                reason=f"Classification error: {str(e)}",
+                reason=f"Classification error: {type(e).__name__}",
             )
     
     def _parse_llm_response(
@@ -125,11 +125,17 @@ class RouterService:
             if end > start:
                 return text[start:end].strip()
         
-        # Try to find raw JSON object
-        if "{" in text and "}" in text:
+        # 尋找第一個完整的 JSON 物件（配對大括號）
+        if "{" in text:
             start = text.find("{")
-            end = text.rfind("}") + 1
-            return text[start:end]
+            depth = 0
+            for i in range(start, len(text)):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return text[start:i + 1]
         
         raise ValueError("No JSON found in response")
     

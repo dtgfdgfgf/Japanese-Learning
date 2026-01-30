@@ -278,7 +278,8 @@ class LLMClient:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = await self.openai_client.chat.completions.create(**kwargs)
+        async with asyncio.timeout(self.timeout):
+            response = await self.openai_client.chat.completions.create(**kwargs)
 
         content = response.choices[0].message.content or ""
 
@@ -321,7 +322,8 @@ class LLMClient:
                 "output_tokens": usage.candidates_token_count if usage else 0,
             }
 
-        return await asyncio.to_thread(_sync_call)
+        async with asyncio.timeout(self.timeout):
+            return await asyncio.to_thread(_sync_call)
 
     async def complete_with_mode(
         self,
