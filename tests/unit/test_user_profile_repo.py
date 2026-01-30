@@ -22,7 +22,7 @@ _TAIPEI_OFFSET = timezone(timedelta(hours=8))
 
 def _make_profile(
     user_id: str = "hashed_user",
-    mode: str = "balanced",
+    mode: str = "free",
     daily_used: int = 0,
     reset_at: datetime | None = None,
 ) -> MagicMock:

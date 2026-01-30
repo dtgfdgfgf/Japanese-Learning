@@ -33,7 +33,6 @@ from src.services.practice_service import has_active_session
 from src.templates.messages import (
     Messages,
     format_mode_switch_confirm,
-    format_save_success,
     format_search_no_result,
     format_search_result_header,
     format_search_result_more,
@@ -86,7 +85,7 @@ async def handle_webhook(
         events = line_client.parse_events(body_str, x_line_signature)
     except InvalidSignatureError:
         logger.warning("Failed to parse LINE events")
-        raise HTTPException(status_code=400, detail="Invalid signature")
+        raise HTTPException(status_code=400, detail="Invalid signature") from None
 
     for event in events:
         if isinstance(event, MessageEvent):
@@ -209,15 +208,26 @@ async def handle_message_event(event: MessageEvent) -> None:
 
         full_response = f"{response}\n\n{footer}"
 
-        # 使用 Quick Reply 發送
+        # 使用 Quick Reply 發送（reply 失敗時 fallback 至 Push API）
         quick_reply = build_mode_quick_replies(current_mode)
-        await line_client.reply_with_quick_reply(reply_token, full_response, quick_reply)
+        replied = await line_client.reply_with_quick_reply(
+            reply_token, full_response, quick_reply
+        )
+        if not replied:
+            logger.warning("Reply failed, falling back to Push API")
+            await line_client.push_message_with_quick_reply(
+                user_id, full_response, quick_reply
+            )
 
     except Exception as e:
         # 最後防線：確保使用者至少收到回覆
         logger.exception(f"Unhandled error in message handler: {e}")
         try:
-            await line_client.reply_message(reply_token, Messages.ERROR_GENERIC)
+            replied = await line_client.reply_message(
+                reply_token, Messages.ERROR_GENERIC
+            )
+            if not replied:
+                await line_client.push_message(user_id, Messages.ERROR_GENERIC)
         except Exception:
             logger.exception("Failed to send fallback error reply")
     finally:
@@ -263,13 +273,24 @@ async def handle_postback_event(event: PostbackEvent) -> None:
             )
             full_response = f"{confirm_msg}\n\n{footer}"
             quick_reply = build_mode_quick_replies(mode)
-            await line_client.reply_with_quick_reply(reply_token, full_response, quick_reply)
+            replied = await line_client.reply_with_quick_reply(
+                reply_token, full_response, quick_reply
+            )
+            if not replied:
+                logger.warning("Postback reply failed, falling back to Push API")
+                await line_client.push_message_with_quick_reply(
+                    user_id, full_response, quick_reply
+                )
         else:
             logger.warning(f"Unknown postback: {event.postback.data if event.postback else 'None'}")
     except Exception as e:
         logger.exception(f"Unhandled error in postback handler: {e}")
         try:
-            await line_client.reply_message(reply_token, Messages.ERROR_GENERIC)
+            replied = await line_client.reply_message(
+                reply_token, Messages.ERROR_GENERIC
+            )
+            if not replied:
+                await line_client.push_message(user_id, Messages.ERROR_GENERIC)
         except Exception:
             logger.exception("Failed to send fallback error reply for postback")
 

@@ -17,12 +17,13 @@ from linebot.v3.messaging import (
     Configuration,
     MessagingApi,
     PostbackAction,
+    PushMessageRequest,
     QuickReply,
     QuickReplyItem,
     ReplyMessageRequest,
     TextMessage,
 )
-from linebot.v3.webhooks import MessageEvent, PostbackEvent, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 from src.config import settings
 
@@ -229,6 +230,74 @@ class LineClient:
             return True
         except Exception as e:
             logger.error(f"Failed to send LINE reply with quick_reply: {e}")
+            return False
+
+    async def push_message(
+        self,
+        user_id: str,
+        text: str,
+    ) -> bool:
+        """透過 Push API 送出文字訊息。
+
+        Args:
+            user_id: LINE user ID（原始值，非 hashed）
+            text: 訊息文字
+
+        Returns:
+            True if sent successfully
+        """
+        try:
+            def _sync_push() -> None:
+                with ApiClient(self.configuration) as api_client:
+                    api = MessagingApi(api_client)
+                    api.push_message(
+                        PushMessageRequest(
+                            to=user_id,
+                            messages=[TextMessage(text=text)],
+                        )
+                    )
+
+            await asyncio.to_thread(_sync_push)
+            logger.debug(f"Pushed message: {text[:50]}...")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to push LINE message: {e}")
+            return False
+
+    async def push_message_with_quick_reply(
+        self,
+        user_id: str,
+        text: str,
+        quick_reply: QuickReply,
+    ) -> bool:
+        """透過 Push API 送出附帶 Quick Reply 的文字訊息。
+
+        Args:
+            user_id: LINE user ID（原始值，非 hashed）
+            text: 訊息文字
+            quick_reply: Quick Reply 物件
+
+        Returns:
+            True if sent successfully
+        """
+        try:
+            def _sync_push() -> None:
+                with ApiClient(self.configuration) as api_client:
+                    api = MessagingApi(api_client)
+                    api.push_message(
+                        PushMessageRequest(
+                            to=user_id,
+                            messages=[
+                                TextMessage(text=text, quick_reply=quick_reply),
+                            ],
+                        )
+                    )
+
+            await asyncio.to_thread(_sync_push)
+            logger.debug(f"Pushed message with quick_reply: {text[:50]}...")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to push LINE message with quick_reply: {e}")
             return False
 
     def get_reply_token(self, event: MessageEvent) -> str | None:

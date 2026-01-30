@@ -44,6 +44,37 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Database initialization skipped: {e}")
         # Don't fail startup - database will connect on first request
 
+    # === Cold start 預熱：減少首次請求延遲 ===
+    # 預熱 DB 連線池
+    try:
+        from sqlalchemy import text as sa_text
+
+        from src.database import get_session
+
+        async with get_session() as session:
+            await session.execute(sa_text("SELECT 1"))
+        logger.info("DB connection pool warmed up")
+    except Exception as e:
+        logger.warning(f"DB warmup skipped: {e}")
+
+    # 預熱 LLM client（僅建立 HTTP client，不發真實請求）
+    try:
+        from src.lib.llm_client import get_llm_client
+
+        get_llm_client()
+        logger.info("LLM client initialized")
+    except Exception as e:
+        logger.warning(f"LLM client warmup skipped: {e}")
+
+    # 預熱 LINE client singleton
+    try:
+        from src.lib.line_client import get_line_client
+
+        get_line_client()
+        logger.info("LINE client initialized")
+    except Exception as e:
+        logger.warning(f"LINE client warmup skipped: {e}")
+
     yield
 
     # Shutdown
