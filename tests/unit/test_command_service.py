@@ -158,3 +158,31 @@ class TestParseCommand:
                 assert result.keyword == sample["expected_keyword"], (
                     f"Failed keyword for input: {sample['input']}"
                 )
+
+
+class TestSetLangCommand:
+    """Tests for SET_LANG command parsing."""
+
+    def test_parse_english_lang(self):
+        """Test parsing '英文' command."""
+        result = parse_command("英文")
+        assert result.command_type == CommandType.SET_LANG
+        assert result.keyword == "英文"
+
+    def test_parse_japanese_lang(self):
+        """Test parsing '日文' command."""
+        result = parse_command("日文")
+        assert result.command_type == CommandType.SET_LANG
+        assert result.keyword == "日文"
+
+    def test_lang_name_map(self):
+        """Test LANG_NAME_MAP contains expected mappings."""
+        from src.services.command_service import LANG_NAME_MAP
+
+        assert LANG_NAME_MAP["英文"] == "en"
+        assert LANG_NAME_MAP["日文"] == "ja"
+
+    def test_partial_lang_not_matched(self):
+        """Test that partial text doesn't match SET_LANG."""
+        result = parse_command("學英文")
+        assert result.command_type == CommandType.UNKNOWN

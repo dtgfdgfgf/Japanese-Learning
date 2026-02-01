@@ -45,16 +45,18 @@ MIN_ITEMS_FOR_PRACTICE = 5
 class PracticeService:
     """Service for managing practice sessions and questions."""
 
-    def __init__(self, session: AsyncSession, mode: str = "free"):
+    def __init__(self, session: AsyncSession, mode: str = "free", target_lang: str = "ja"):
         """
         Initialize PracticeService.
 
         Args:
             session: Database session
             mode: LLM mode（預留供未來 LLM 題目生成使用）
+            target_lang: 目標學習語言 (ja/en)
         """
         self.session = session
         self.mode = mode
+        self.target_lang = target_lang
         self.item_repo = ItemRepository(session)
         self.practice_log_repo = PracticeLogRepository(session)
         self.session_service = SessionService(session)
@@ -270,11 +272,12 @@ class PracticeService:
         """
         Generate vocabulary recall question.
 
-        Format: 「{meaning}」的日文是？
+        Format: 「{meaning}」的日文/英文是？
         """
         surface = payload.get("surface", "")
         glossary = payload.get("glossary_zh", [])
         reading = payload.get("reading", "")
+        pronunciation = payload.get("pronunciation", "")
 
         if not surface or not glossary:
             return None
@@ -283,8 +286,10 @@ class PracticeService:
         expected = surface
 
         hints = []
-        if reading and reading != surface:
+        if self.target_lang == "ja" and reading and reading != surface:
             hints.append(f"讀音：{reading}")
+        elif self.target_lang == "en" and pronunciation:
+            hints.append(f"發音：{pronunciation}")
 
         return PracticeQuestion(
             question_id=question_id,
@@ -294,6 +299,7 @@ class PracticeService:
             expected_answer=expected,
             hints=hints,
             item_key=item.key,
+            target_lang=self.target_lang,
         )
 
     def _generate_grammar_question(
@@ -329,6 +335,7 @@ class PracticeService:
             prompt=prompt,
             expected_answer=expected,
             item_key=item.key,
+            target_lang=self.target_lang,
         )
 
     def _generate_vocab_meaning_question(
@@ -337,12 +344,14 @@ class PracticeService:
         item,
         payload: dict,
     ) -> PracticeQuestion | None:
-        """生成日→中詞義題。
+        """生成目標語→中文詞義題。
 
-        Format: 「考える（かんがえる）」是什麼意思？
+        日文 Format: 「考える（かんがえる）」是什麼意思？
+        英文 Format: 「consider (/kənˈsɪdər/)」是什麼意思？
         """
         surface = payload.get("surface", "")
         reading = payload.get("reading", "")
+        pronunciation = payload.get("pronunciation", "")
         glossary = payload.get("glossary_zh", [])
 
         if not surface or not glossary:
@@ -350,10 +359,12 @@ class PracticeService:
 
         meaning = glossary[0] if isinstance(glossary, list) else str(glossary)
 
-        # 提示文字：surface + reading（若不同）
+        # 提示文字：surface + reading/pronunciation（若有）
         prompt = surface
-        if reading and reading != surface:
+        if self.target_lang == "ja" and reading and reading != surface:
             prompt = f"{surface}（{reading}）"
+        elif self.target_lang == "en" and pronunciation:
+            prompt = f"{surface} ({pronunciation})"
 
         return PracticeQuestion(
             question_id=question_id,
@@ -362,6 +373,7 @@ class PracticeService:
             prompt=prompt,
             expected_answer=meaning,
             item_key=item.key,
+            target_lang=self.target_lang,
         )
 
     def _generate_grammar_usage_question(
@@ -389,6 +401,7 @@ class PracticeService:
             prompt=prompt,
             expected_answer=pattern,
             item_key=item.key,
+            target_lang=self.target_lang,
         )
 
     async def submit_answer(

@@ -67,7 +67,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
     
     # ========== 分析相關 ==========
-    "ANALYZE_NO_DEFERRED": "沒有待分析的素材 📭\n請先「入庫」一些日文內容",
+    "ANALYZE_NO_DEFERRED": "沒有待分析的素材 📭\n請先「入庫」一些學習內容",
     "ANALYZE_EMPTY_RESULT": "沒有發現可學習的單字或文法 📝",
     "ANALYZE_SUCCESS": "✨ 抽出 {summary}",
     "ANALYZE_TRUNCATED_NOTE": "\n（內容較長，已限制抽取數量）",
@@ -111,7 +111,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
         "✏️ 練習紀錄：{total_practice} 題（正確率 {correct_rate}%）\n\n"
         "📅 近 7 日：{recent_practice} 題（正確率 {recent_rate}%）"
     ),
-    "STATS_EMPTY": "📊 尚無學習紀錄\n\n先入庫一些日文內容，再開始練習吧！",
+    "STATS_EMPTY": "📊 尚無學習紀錄\n\n先入庫一些學習內容，再開始練習吧！",
     
     # ========== 刪除相關 ==========
     "DELETE_NOTHING": "沒有可刪除的資料 📭",
@@ -144,19 +144,20 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     # ========== 說明訊息 ==========
     "HELP": """📖 可用指令：
 
-• 入庫 - 儲存上一則訊息的日文內容
+• 入庫 - 儲存上一則訊息的學習內容
 • 分析 - 分析已入庫的內容，抽取單字/文法
 • 練習 - 開始練習題
 • 查詢 <關鍵字> - 搜尋已入庫的內容
 • 統計 - 查看學習進度
 • 用量 - 查看 API 使用量與費用
+• 英文/日文 - 切換學習語言
 • 免費模式/便宜模式/嚴謹模式 - 切換 LLM 模式
 • 刪除最後一筆 - 刪除最近一筆入庫
 • 清空資料 - 刪除所有資料（需二次確認）
 • 隱私 - 查看資料保存說明
 
 💡 使用方式：
-1. 貼上日文內容
+1. 貼上學習內容（日文或英文）
 2. 輸入「入庫」
 3. 輸入「分析」
 4. 輸入「練習」開始複習！""",
@@ -197,6 +198,10 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "FOOTER_COST_ESTIMATE": "💳若改用嚴謹模式：本次約 ${cost:.4f}",
     "FOOTER_CAP_WARNING": "⚠️ 今日免費額度已用完，仍可繼續使用",
     "MODE_SWITCH_CONFIRM": "已切換為 {mode_label}",
+
+    # ========== 語言切換 ==========
+    "LANG_SWITCH_CONFIRM": "已切換為學習{lang_name} 🌐",
+    "LANG_SWITCH_INVALID": "不支援的語言，目前僅支援「學日文」或「學英文」",
 }
 
 
@@ -533,6 +538,12 @@ def format_usage_footer(
         lines.append(_MESSAGES_ZH_TW["FOOTER_CAP_WARNING"])
 
     return "\n".join(lines)
+
+
+def format_lang_switch_confirm(lang: str) -> str:
+    """格式化語言切換確認訊息。"""
+    lang_name = {"ja": "日文", "en": "英文"}.get(lang, lang)
+    return Messages.format("LANG_SWITCH_CONFIRM", lang_name=lang_name)
 
 
 def format_mode_switch_confirm(mode: str) -> str:

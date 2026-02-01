@@ -34,6 +34,7 @@ class RouterService:
         message: str,
         context: Optional[str] = None,
         mode: str = "free",
+        target_lang: str = "ja",
     ) -> RouterResponse:
         """Classify user message intent.
 
@@ -47,7 +48,7 @@ class RouterService:
         """
         try:
             user_prompt = format_router_request(message, context)
-            system_prompt = get_system_prompt()
+            system_prompt = get_system_prompt(lang=target_lang)
 
             response = await self.llm_client.complete_with_mode(
                 mode=mode,
@@ -59,7 +60,7 @@ class RouterService:
             response_text = response.content
             
             # Parse response
-            return self._parse_llm_response(response_text, message)
+            return self._parse_llm_response(response_text, message, target_lang=target_lang)
             
         except Exception as e:
             logger.error(f"Router classification failed: {e}")
@@ -73,13 +74,15 @@ class RouterService:
         self,
         response_text: str,
         original_message: str,
+        target_lang: str = "ja",
     ) -> RouterResponse:
         """Parse LLM response to RouterResponse.
-        
+
         Args:
             response_text: Raw LLM response
             original_message: Original user message for fallback
-            
+            target_lang: 目標語言 (ja/en)
+
         Returns:
             Parsed RouterResponse
         """
@@ -101,7 +104,7 @@ class RouterService:
             logger.warning(f"Failed to parse router response: {e}")
             
             # Try heuristic classification as fallback
-            return self._heuristic_classify(original_message)
+            return self._heuristic_classify(original_message, target_lang=target_lang)
     
     def _extract_json(self, text: str) -> str:
         """Extract JSON from LLM response text.
@@ -139,7 +142,7 @@ class RouterService:
         
         raise ValueError("No JSON found in response")
     
-    def _heuristic_classify(self, message: str) -> RouterResponse:
+    def _heuristic_classify(self, message: str, target_lang: str = "ja") -> RouterResponse:
         """Apply simple heuristics when LLM parsing fails.
         
         Args:
@@ -149,16 +152,29 @@ class RouterService:
             Heuristic-based RouterResponse
         """
         message_lower = message.lower().strip()
-        
-        # Check for Japanese content (potential save intent)
+
+        # 根據目標語言檢查是否為學習素材
         japanese_chars = sum(1 for c in message if '\u3040' <= c <= '\u309f' or '\u30a0' <= c <= '\u30ff' or '\u4e00' <= c <= '\u9fff')
-        japanese_ratio = japanese_chars / max(len(message), 1)
-        
-        if japanese_ratio > 0.5 and len(message) > 10:
+        ascii_alpha_chars = sum(1 for c in message if c.isascii() and c.isalpha())
+        total_chars = max(len(message.replace(" ", "")), 1)
+
+        japanese_ratio = japanese_chars / total_chars
+        english_ratio = ascii_alpha_chars / total_chars
+
+        # 日文模式：多數日文字元 → save
+        if target_lang == "ja" and japanese_ratio > 0.5 and len(message) > 10:
             return RouterResponse(
                 intent=IntentType.SAVE,
                 confidence=0.6,
                 reason="Message contains significant Japanese content",
+            )
+
+        # 英文模式：多數英文字元且夠長 → save
+        if target_lang == "en" and english_ratio > 0.5 and len(message) > 20:
+            return RouterResponse(
+                intent=IntentType.SAVE,
+                confidence=0.6,
+                reason="Message contains significant English content",
             )
         
         # Check for question patterns
@@ -181,6 +197,7 @@ class RouterService:
         message: str,
         context: Optional[str] = None,
         mode: str = "free",
+        target_lang: str = "ja",
     ) -> str:
         """Generate a chat response for learning questions.
 
@@ -188,14 +205,16 @@ class RouterService:
             message: User's question
             context: Optional conversation context
             mode: LLM mode (cheap/balanced/rigorous)
+            target_lang: 目標語言 (ja/en)
 
         Returns:
             Generated response
         """
-        system_prompt = """你是一個友善的日語學習助手。
+        lang_name = {"ja": "日語", "en": "英語"}.get(target_lang, "日語")
+        system_prompt = f"""你是一個友善的{lang_name}學習助手。
 
-請簡短回答用戶的日語學習相關問題。
-如果問題與日語學習無關，請禮貌地引導用戶使用學習功能。
+請簡短回答用戶的{lang_name}學習相關問題。
+如果問題與{lang_name}學習無關，請禮貌地引導用戶使用學習功能。
 
 回答風格：
 - 簡潔明瞭

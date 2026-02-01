@@ -181,10 +181,42 @@ class TestHeuristicClassification:
     def test_short_message_low_confidence(self):
         """Test that short messages have low confidence."""
         service = RouterService()
-        
+
         result = service._heuristic_classify("ok")
-        
+
         assert result.confidence < 0.5
+
+    def test_english_content_detected_as_save_in_en_mode(self):
+        """英文模式下，長英文內容應判為 save。"""
+        service = RouterService()
+
+        result = service._heuristic_classify(
+            "The committee has decided to postpone the meeting until further notice.",
+            target_lang="en",
+        )
+
+        assert result.intent == IntentType.SAVE
+
+    def test_english_content_not_save_in_ja_mode(self):
+        """日文模式下，英文內容不應判為 save。"""
+        service = RouterService()
+
+        result = service._heuristic_classify(
+            "The committee has decided to postpone the meeting.",
+            target_lang="ja",
+        )
+
+        assert result.intent != IntentType.SAVE
+
+    def test_router_prompt_uses_target_lang(self):
+        """Router system prompt 依語言切換。"""
+        from src.prompts.router import get_system_prompt
+
+        ja_prompt = get_system_prompt(lang="ja")
+        en_prompt = get_system_prompt(lang="en")
+
+        assert "日文" in ja_prompt
+        assert "英文" in en_prompt
 
 
 class TestJsonExtraction:

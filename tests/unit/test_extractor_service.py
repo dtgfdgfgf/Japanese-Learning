@@ -299,5 +299,56 @@ class TestCreateExtractionSummary:
         )
         
         summary = create_extraction_summary(response)
-        
+
         assert summary.is_truncated is True
+
+
+class TestExtractorPromptLang:
+    """Tests for multi-language extractor prompts."""
+
+    def test_get_system_prompt_ja(self):
+        """日文 prompt 包含 Japanese 關鍵字。"""
+        from src.prompts.extractor import get_system_prompt
+
+        prompt = get_system_prompt(max_items=10, lang="ja")
+        assert "Japanese" in prompt
+        assert "{max_items}" not in prompt  # 確認模板已填充
+
+    def test_get_system_prompt_en(self):
+        """英文 prompt 包含 English 關鍵字。"""
+        from src.prompts.extractor import get_system_prompt
+
+        prompt = get_system_prompt(max_items=10, lang="en")
+        assert "English" in prompt
+        assert "pronunciation" in prompt
+
+    def test_get_system_prompt_unknown_falls_back_to_ja(self):
+        """未知語言 fallback 至日文 prompt。"""
+        from src.prompts.extractor import get_system_prompt
+
+        prompt = get_system_prompt(max_items=10, lang="kr")
+        assert "Japanese" in prompt
+
+    def test_format_extractor_request_en(self):
+        """英文 request 包含 English label。"""
+        from src.prompts.extractor import format_extractor_request
+
+        req = format_extractor_request("Hello world", max_items=10, lang="en")
+        assert "English" in req
+
+    def test_vocab_item_pronunciation_payload(self):
+        """英文 vocab item 的 to_payload 包含 pronunciation。"""
+        item = ExtractedItem(
+            item_type="vocab",
+            key="vocab:consider",
+            surface="consider",
+            pronunciation="/kənˈsɪdər/",
+            pos="verb",
+            glossary_zh=["考慮"],
+            confidence=1.0,
+        )
+        payload = item.to_payload()
+
+        assert "pronunciation" in payload
+        assert payload["pronunciation"] == "/kənˈsɪdər/"
+        assert "reading" not in payload  # 英文不應有 reading

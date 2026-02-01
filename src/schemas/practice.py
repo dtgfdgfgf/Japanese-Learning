@@ -16,6 +16,13 @@ if TYPE_CHECKING:
     pass
 
 
+# 目標語言名稱映射
+_TARGET_LANG_NAMES: dict[str, str] = {
+    "ja": "日文",
+    "en": "英文",
+}
+
+
 def _utc_now() -> datetime:
     """取得當前 UTC 時間（timezone-aware）。"""
     return datetime.now(timezone.utc)
@@ -47,18 +54,20 @@ class PracticeQuestion(BaseModel):
         description="Original context where this item appeared"
     )
     item_key: str = Field(..., description="Item key for reference")
-    
+    target_lang: str = Field(default="ja", description="目標語言 (ja/en)")
+
     def format_for_display(self, index: int) -> str:
         """Format question for LINE message display.
-        
+
         Args:
             index: Question number (1-based)
-            
+
         Returns:
             Formatted string for display
         """
+        lang_name = _TARGET_LANG_NAMES.get(self.target_lang, "日文")
         if self.practice_type == PracticeType.VOCAB_RECALL:
-            return f"{index}. 「{self.prompt}」的日文是？"
+            return f"{index}. 「{self.prompt}」的{lang_name}是？"
         elif self.practice_type == PracticeType.GRAMMAR_CLOZE:
             return f"{index}. {self.prompt}"
         elif self.practice_type == PracticeType.VOCAB_MEANING:

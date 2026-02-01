@@ -28,7 +28,11 @@ class ExtractedItem(BaseModel):
     )
     reading: Optional[str] = Field(
         None,
-        description="Reading in hiragana (e.g., 'かんがえる')"
+        description="Reading in hiragana (e.g., 'かんがえる') — 日文用"
+    )
+    pronunciation: Optional[str] = Field(
+        None,
+        description="IPA pronunciation (e.g., '/kənˈsɪdər/') — 英文用"
     )
     pos: Optional[str] = Field(
         None,
@@ -72,14 +76,19 @@ class ExtractedItem(BaseModel):
     def to_payload(self) -> dict:
         """Convert to payload dict for Item model."""
         if self.item_type == "vocab":
-            return {
+            payload: dict = {
                 "surface": self.surface,
-                "reading": self.reading,
                 "pos": self.pos,
                 "glossary_zh": self.glossary_zh or [],
                 "example": self.example,
                 "example_translation": self.example_translation,
             }
+            # 日文用 reading，英文用 pronunciation
+            if self.reading:
+                payload["reading"] = self.reading
+            if self.pronunciation:
+                payload["pronunciation"] = self.pronunciation
+            return payload
         else:  # grammar
             return {
                 "pattern": self.pattern,

@@ -37,7 +37,14 @@ COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     (r"^(統計|進度)$", CommandType.STATS, False),
     (r"^切換(免費|便宜|嚴謹)$", CommandType.MODE_SWITCH, True),
     (r"^(免費模式|便宜模式|嚴謹模式)$", CommandType.MODE_SWITCH, True),
+    (r"^(英文|日文)$", CommandType.SET_LANG, True),
 ]
+
+# 語言名稱 → lang key 映射
+LANG_NAME_MAP: dict[str, str] = {
+    "英文": "en",
+    "日文": "ja",
+}
 
 # 模式名稱 → mode key 映射
 MODE_NAME_MAP: dict[str, str] = {

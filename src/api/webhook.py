@@ -28,10 +28,11 @@ from src.models.item import Item
 from src.repositories.user_profile_repo import UserProfileRepository
 from src.repositories.user_state_repo import UserStateRepository
 from src.schemas.command import CommandType, ParsedCommand
-from src.services.command_service import MODE_NAME_MAP, CommandService, parse_command
+from src.services.command_service import LANG_NAME_MAP, MODE_NAME_MAP, CommandService, parse_command
 from src.services.practice_service import has_active_session
 from src.templates.messages import (
     Messages,
+    format_lang_switch_confirm,
     format_mode_switch_confirm,
     format_search_no_result,
     format_search_result_header,
@@ -122,8 +123,9 @@ async def handle_message_event(event: MessageEvent) -> None:
     token = usage_context_var.set(usage_ctx)
 
     try:
-        # === Pre-dispatch session：讀取 profile + 檢查 session + 模式切換 ===
+        # === Pre-dispatch session：讀取 profile + 檢查 session + 模式/語言切換 ===
         current_mode = "free"
+        target_lang = "ja"
         daily_used = 0
         daily_cap = 50000
         parsed = parse_command(text)
@@ -135,6 +137,7 @@ async def handle_message_event(event: MessageEvent) -> None:
                     profile_repo = UserProfileRepository(session)
                     profile = await profile_repo.get_or_create(hashed_uid)
                     current_mode = profile.mode or "free"
+                    target_lang = profile.target_lang or "ja"
                     daily_used = profile.daily_used_tokens or 0
                     daily_cap = profile.daily_cap_tokens_free or 50000
                 except Exception as e:
@@ -154,24 +157,44 @@ async def handle_message_event(event: MessageEvent) -> None:
                             current_mode = profile.mode
                         except Exception as e:
                             logger.warning(f"Failed to set mode: {e}")
+
+                # 語言切換需在 reply 前完成
+                if parsed.command_type == CommandType.SET_LANG:
+                    lang_key = _resolve_lang_key(parsed)
+                    if lang_key:
+                        try:
+                            profile_repo = UserProfileRepository(session)
+                            profile = await profile_repo.set_target_lang(hashed_uid, lang_key)
+                            target_lang = profile.target_lang
+                        except Exception as e:
+                            logger.warning(f"Failed to set target_lang: {e}")
+                    else:
+                        logger.warning(f"Could not resolve lang_key from: {parsed.keyword}")
         except Exception as e:
             logger.warning(f"Failed to open pre-dispatch session: {e}")
 
         # === Dispatch ===
         if parsed.command_type == CommandType.UNKNOWN and has_session:
-            response = await _handle_practice_answer(hashed_uid, text, current_mode)
+            response = await _handle_practice_answer(hashed_uid, text, current_mode, target_lang)
         elif parsed.command_type == CommandType.MODE_SWITCH:
             mode_key = _resolve_mode_key(parsed)
             if mode_key:
                 response = format_mode_switch_confirm(mode_key)
             else:
                 response = Messages.FALLBACK_UNKNOWN
+        elif parsed.command_type == CommandType.SET_LANG:
+            lang_key = _resolve_lang_key(parsed)
+            if lang_key:
+                response = format_lang_switch_confirm(lang_key)
+            else:
+                response = Messages.format("LANG_SWITCH_INVALID")
         else:
             response = await _dispatch_command(
                 command=parsed,
                 line_user_id=user_id,
                 raw_text=text,
                 mode=current_mode,
+                target_lang=target_lang,
             )
 
         # === Post-dispatch session：累加 token + 儲存 last_message ===
@@ -308,11 +331,19 @@ def _resolve_mode_key(command: ParsedCommand) -> str | None:
     return MODE_NAME_MAP.get(command.raw_text.strip())
 
 
+def _resolve_lang_key(command: ParsedCommand) -> str | None:
+    """從 ParsedCommand 解析語言 key（僅允許 ja/en）。"""
+    if command.keyword:
+        return LANG_NAME_MAP.get(command.keyword)
+    return None
+
+
 async def _dispatch_command(
     command: ParsedCommand,
     line_user_id: str,
     raw_text: str,
     mode: str = "free",
+    target_lang: str = "ja",
 ) -> str:
     """Dispatch command to appropriate handler."""
     command_type = command.command_type
@@ -332,10 +363,10 @@ async def _dispatch_command(
         return await _handle_search(line_user_id, command.keyword)
 
     if command_type == CommandType.ANALYZE:
-        return await _handle_analyze(line_user_id, mode)
+        return await _handle_analyze(line_user_id, mode, target_lang)
 
     if command_type == CommandType.PRACTICE:
-        return await _handle_practice(line_user_id, mode)
+        return await _handle_practice(line_user_id, mode, target_lang)
 
     if command_type == CommandType.DELETE_LAST:
         return await _handle_delete_last(line_user_id)
@@ -352,7 +383,7 @@ async def _dispatch_command(
     if command_type == CommandType.DELETE_CONFIRM:
         return await _handle_delete_confirm(line_user_id)
 
-    return await _handle_unknown(line_user_id, raw_text, mode)
+    return await _handle_unknown(line_user_id, raw_text, mode, target_lang)
 
 
 async def _handle_save(line_user_id: str) -> str:
@@ -406,7 +437,7 @@ async def _handle_search(line_user_id: str, keyword: str | None) -> str:
             return Messages.ERROR_SEARCH
 
 
-async def _handle_analyze(line_user_id: str, mode: str = "free") -> str:
+async def _handle_analyze(line_user_id: str, mode: str = "free", target_lang: str = "ja") -> str:
     """處理分析指令。"""
     hashed_user_id = hash_user_id(line_user_id)
 
@@ -429,6 +460,7 @@ async def _handle_analyze(line_user_id: str, mode: str = "free") -> str:
                 doc_id=str(doc.doc_id),
                 user_id=hashed_user_id,
                 mode=mode,
+                target_lang=target_lang,
             )
 
             summary = create_extraction_summary(result)
@@ -438,14 +470,14 @@ async def _handle_analyze(line_user_id: str, mode: str = "free") -> str:
             return Messages.ERROR_ANALYZE
 
 
-async def _handle_practice(line_user_id: str, mode: str = "free") -> str:
+async def _handle_practice(line_user_id: str, mode: str = "free", target_lang: str = "ja") -> str:
     """處理練習指令。"""
     hashed_user_id = hash_user_id(line_user_id)
 
     async with get_session() as session:
         from src.services.practice_service import PracticeService
 
-        practice_service = PracticeService(session, mode=mode)
+        practice_service = PracticeService(session, mode=mode, target_lang=target_lang)
 
         try:
             _, message = await practice_service.create_session(
@@ -488,12 +520,12 @@ async def _handle_stats(line_user_id: str) -> str:
             return Messages.ERROR_GENERIC
 
 
-async def _handle_practice_answer(hashed_user_id: str, answer_text: str, mode: str = "free") -> str:
+async def _handle_practice_answer(hashed_user_id: str, answer_text: str, mode: str = "free", target_lang: str = "ja") -> str:
     """處理練習答案提交。"""
     async with get_session() as session:
         from src.services.practice_service import PracticeService
 
-        practice_service = PracticeService(session, mode=mode)
+        practice_service = PracticeService(session, mode=mode, target_lang=target_lang)
 
         try:
             _, message = await practice_service.submit_answer(
@@ -562,6 +594,7 @@ async def _handle_unknown(
     line_user_id: str,
     raw_text: str,
     mode: str = "free",
+    target_lang: str = "ja",
 ) -> str:
     """使用 Router LLM 處理未知指令。"""
     from src.schemas.router import IntentType
@@ -571,7 +604,7 @@ async def _handle_unknown(
     router_service = get_router_service()
 
     try:
-        classification = await router_service.classify(raw_text, mode=mode)
+        classification = await router_service.classify(raw_text, mode=mode, target_lang=target_lang)
 
         if classification.intent == IntentType.SAVE and classification.confidence >= 0.8:
             async with get_session() as session:
@@ -583,7 +616,7 @@ async def _handle_unknown(
             return f"{result.message}\n\n💡 輸入「分析」來抽取單字和文法"
 
         if classification.intent == IntentType.CHAT:
-            response = await router_service.get_chat_response(raw_text, mode=mode)
+            response = await router_service.get_chat_response(raw_text, mode=mode, target_lang=target_lang)
             return response
 
         if classification.intent == IntentType.HELP:
@@ -627,11 +660,15 @@ def _format_search_results(items: "Sequence[Item]") -> str:
         if item.item_type == "vocab":
             surface = payload.get("surface", "")
             reading = payload.get("reading", "")
+            pronunciation = payload.get("pronunciation", "")
             glossary = payload.get("glossary_zh", [])
             meaning = glossary[0] if glossary else ""
 
+            # 日文用【reading】，英文用 (pronunciation)
             if reading and reading != surface:
                 lines.append(f"{i}. {surface}【{reading}】- {meaning}")
+            elif pronunciation:
+                lines.append(f"{i}. {surface} ({pronunciation}) - {meaning}")
             else:
                 lines.append(f"{i}. {surface} - {meaning}")
 

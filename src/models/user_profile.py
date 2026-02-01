@@ -32,6 +32,13 @@ class UserProfile(Base):
         primary_key=True,
         comment="Hashed LINE user ID",
     )
+    target_lang: Mapped[str] = mapped_column(
+        String(5),
+        nullable=False,
+        default="ja",
+        server_default="ja",
+        comment="目標學習語言: ja/en",
+    )
     mode: Mapped[str] = mapped_column(
         String(16),
         nullable=False,

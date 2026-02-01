@@ -57,6 +57,7 @@ class ExtractorService:
         doc_id: str,
         user_id: str,
         mode: str = "free",
+        target_lang: str = "ja",
     ) -> ExtractorResponse:
         """
         Extract vocabulary and grammar items from a document.
@@ -91,15 +92,17 @@ class ExtractorService:
 
         raw_text = raw_message.raw_text
 
-        # Detect language
+        # 偵測語言並與使用者目標語言比對
         lang = detect_language(raw_text)
-        if lang not in ("ja", "unknown"):
-            logger.warning(f"Document {doc_id} doesn't appear to be Japanese: {lang}")
+        # 允許：偵測到的語言與目標一致、unknown、或 mixed
+        if lang not in (target_lang, "unknown", "mixed"):
+            lang_name = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
+            logger.warning(f"Document {doc_id} lang mismatch: detected={lang}, target={target_lang}")
             await self._update_document_status(doc_id, "skipped", lang)
             return ExtractorResponse(
                 doc_id=doc_id,
                 items=[],
-                warnings=[f"Text doesn't appear to be Japanese (detected: {lang})"],
+                warnings=[f"內容似乎不是{lang_name}（偵測結果：{lang}）"],
             )
 
         # Determine max items based on text length
@@ -108,7 +111,7 @@ class ExtractorService:
 
         # Call LLM for extraction
         try:
-            items, llm_trace = await self._call_llm_extraction(raw_text, max_items, mode)
+            items, llm_trace = await self._call_llm_extraction(raw_text, max_items, mode, target_lang)
             # 記錄 API 用量
             if llm_trace:
                 await self.usage_repo.create_log(
@@ -164,6 +167,7 @@ class ExtractorService:
         raw_text: str,
         max_items: int,
         mode: str = "free",
+        target_lang: str = "ja",
     ) -> tuple[list[ExtractedItem], LLMTrace]:
         """
         Call LLM to extract items from text.
@@ -172,12 +176,13 @@ class ExtractorService:
             raw_text: Text to analyze
             max_items: Maximum items to extract
             mode: LLM mode (cheap/balanced/rigorous)
+            target_lang: 目標語言 (ja/en)
 
         Returns:
             Tuple of (list of ExtractedItem objects, LLMTrace)
         """
-        system_prompt = get_system_prompt(max_items)
-        user_message = format_extractor_request(raw_text, max_items)
+        system_prompt = get_system_prompt(max_items, lang=target_lang)
+        user_message = format_extractor_request(raw_text, max_items, lang=target_lang)
 
         # 使用 mode-aware JSON 完成
         response_data, llm_trace = await self.llm_client.complete_json_with_mode(

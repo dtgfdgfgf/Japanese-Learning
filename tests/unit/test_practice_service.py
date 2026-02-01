@@ -246,8 +246,9 @@ class TestVocabMeaningQuestion:
             "glossary_zh": ["思考", "考慮"],
         }
 
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
             question = service._generate_vocab_meaning_question(
                 "q1", mock_item, mock_item.payload
             )
@@ -272,8 +273,9 @@ class TestVocabMeaningQuestion:
             "glossary_zh": ["厲害"],
         }
 
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
             question = service._generate_vocab_meaning_question(
                 "q1", mock_item, mock_item.payload
             )
@@ -299,8 +301,9 @@ class TestGrammarUsageQuestion:
             "meaning_zh": "嘗試做某事",
         }
 
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
             question = service._generate_grammar_usage_question(
                 "q1", mock_item, mock_item.payload
             )
@@ -319,8 +322,9 @@ class TestGrammarUsageQuestion:
         mock_item.item_id = str(uuid.uuid4())
         mock_item.payload = {"pattern": "〜てみる"}
 
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
             question = service._generate_grammar_usage_question(
                 "q1", mock_item, mock_item.payload
             )
@@ -366,8 +370,9 @@ class TestRandomQuestionType:
             "glossary_zh": ["思考"],
         }
 
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
             types_seen = set()
             for _ in range(50):
                 q = service._generate_question(mock_item)
@@ -391,8 +396,9 @@ class TestRandomQuestionType:
             "example": "新しいレストランに行ってみたい",
         }
 
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
             types_seen = set()
             for _ in range(50):
                 q = service._generate_question(mock_item)
@@ -411,8 +417,9 @@ class TestPracticeServiceSelection:
         """Test behavior when user has fewer than 5 items."""
         from src.services.practice_service import PracticeService, MIN_ITEMS_FOR_PRACTICE
         
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
             service.session = async_db_session
             service.item_repo = MagicMock()
             service.item_repo.count_by_user = AsyncMock(return_value=3)
@@ -442,8 +449,9 @@ class TestPracticeServiceSelection:
             }
             mock_items.append(item)
         
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
             service.session = async_db_session
             service.item_repo = MagicMock()
             service.item_repo.count_by_user = AsyncMock(return_value=10)
@@ -477,8 +485,9 @@ class TestQuestionGeneration:
             "glossary_zh": ["思考", "考慮"],
         }
 
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
 
             question = service._generate_question(mock_item)
 
@@ -499,10 +508,81 @@ class TestQuestionGeneration:
             "example": "新しいレストランに行ってみたい",
         }
 
-        with patch.object(PracticeService, "__init__", lambda self, session: None):
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
             service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
 
             question = service._generate_question(mock_item)
 
             assert question is not None
             assert question.practice_type in (PracticeType.GRAMMAR_CLOZE, PracticeType.GRAMMAR_USAGE)
+
+
+class TestEnglishPracticeQuestions:
+    """Tests for English target_lang practice question generation."""
+
+    def test_vocab_recall_english_display(self):
+        """英文模式 vocab recall 顯示『的英文是？』。"""
+        q = PracticeQuestion(
+            question_id="q1",
+            item_id="item1",
+            practice_type=PracticeType.VOCAB_RECALL,
+            prompt="考慮",
+            expected_answer="consider",
+            item_key="vocab:consider",
+            target_lang="en",
+        )
+
+        formatted = q.format_for_display(1)
+
+        assert "英文" in formatted
+        assert "日文" not in formatted
+
+    def test_vocab_meaning_english_pronunciation(self):
+        """英文模式 vocab meaning 題目包含 pronunciation。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "vocab"
+        mock_item.key = "vocab:consider"
+        mock_item.payload = {
+            "surface": "consider",
+            "pronunciation": "/kənˈsɪdər/",
+            "glossary_zh": ["考慮", "認為"],
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.target_lang = "en"
+            question = service._generate_vocab_meaning_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is not None
+            assert "/kənˈsɪdər/" in question.prompt
+            assert question.expected_answer == "考慮"
+
+    def test_vocab_recall_english_hints(self):
+        """英文模式 vocab recall hints 包含 pronunciation。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "vocab"
+        mock_item.key = "vocab:consider"
+        mock_item.payload = {
+            "surface": "consider",
+            "pronunciation": "/kənˈsɪdər/",
+            "glossary_zh": ["考慮"],
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.target_lang = "en"
+            question = service._generate_vocab_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is not None
+            assert any("發音" in h for h in question.hints)

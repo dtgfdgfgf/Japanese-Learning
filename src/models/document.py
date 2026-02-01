@@ -15,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from src.database import Base
 
 # Type aliases for document fields
-LangType = Literal["ja", "mixed", "unknown"]
+LangType = Literal["ja", "en", "mixed", "unknown"]
 DocType = Literal["vocab", "grammar", "mixed", "text"]
 ParseStatus = Literal["parsed", "deferred", "failed"]
 

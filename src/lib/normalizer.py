@@ -64,8 +64,9 @@ def normalize_for_compare(text: str) -> str:
     # NFKC normalization
     normalized = unicodedata.normalize("NFKC", normalized)
 
-    # Katakana to Hiragana for consistent comparison
-    normalized = jaconv.kata2hira(normalized)
+    # Katakana to Hiragana for consistent comparison（僅對含日文假名的文字執行）
+    if any(0x30A0 <= ord(c) <= 0x30FF for c in normalized):
+        normalized = jaconv.kata2hira(normalized)
 
     # Lowercase (for romaji and alphabets)
     normalized = normalized.lower()
@@ -150,15 +151,16 @@ def detect_language(text: str) -> str:
         text: Input text
 
     Returns:
-        "ja" for Japanese, "mixed" for mixed content, "unknown" otherwise
+        "ja" for Japanese, "en" for English, "mixed" for mixed content, "unknown" otherwise
     """
     if not text:
         return "unknown"
 
-    # Count character types
+    # 計算各類字元數
     hiragana_count = 0
     katakana_count = 0
     kanji_count = 0
+    ascii_alpha_count = 0
     other_count = 0
 
     for char in text:
@@ -169,21 +171,30 @@ def detect_language(text: str) -> str:
             katakana_count += 1
         elif 0x4E00 <= code <= 0x9FFF:  # CJK Unified Ideographs (Kanji)
             kanji_count += 1
+        elif char.isascii() and char.isalpha():  # ASCII 英文字母
+            ascii_alpha_count += 1
         elif not char.isspace():
             other_count += 1
 
     japanese_count = hiragana_count + katakana_count + kanji_count
-    total_count = japanese_count + other_count
+    total_count = japanese_count + ascii_alpha_count + other_count
 
     if total_count == 0:
         return "unknown"
 
     japanese_ratio = japanese_count / total_count
+    english_ratio = ascii_alpha_count / total_count
 
     if japanese_ratio >= 0.5:
         return "ja"
+    elif english_ratio >= 0.5:
+        return "en"
+    elif japanese_ratio > 0 and english_ratio > 0:
+        return "mixed"
     elif japanese_ratio > 0:
         return "mixed"
+    elif english_ratio > 0:
+        return "en"
     else:
         return "unknown"
 

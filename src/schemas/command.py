@@ -25,6 +25,7 @@ class CommandType(str, Enum):
     COST = "cost"  # 用量
     STATS = "stats"  # 統計
     MODE_SWITCH = "mode_switch"  # 模式切換
+    SET_LANG = "set_lang"  # 語言切換
     UNKNOWN = "unknown"  # 未知指令
 
 

@@ -72,6 +72,23 @@ class UserProfileRepository:
 
         return profile
 
+    async def set_target_lang(self, user_id: str, target_lang: str) -> UserProfile:
+        """切換目標學習語言。
+
+        Args:
+            user_id: Hashed LINE user ID
+            target_lang: ja / en
+
+        Returns:
+            更新後的 UserProfile
+        """
+        if target_lang not in ("ja", "en"):
+            raise ValueError(f"Invalid target_lang: {target_lang}")
+        profile = await self.get_or_create(user_id)
+        profile.target_lang = target_lang
+        await self.session.flush()
+        return profile
+
     async def set_mode(self, user_id: str, mode: str) -> UserProfile:
         """切換 LLM 模式。
 
