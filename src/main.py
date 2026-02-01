@@ -4,7 +4,9 @@ T023: Setup FastAPI app with health endpoint in src/main.py
 DoD: GET /health 回傳 {"status": "ok"}；uvicorn 可啟動
 """
 
+import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -22,6 +24,26 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+async def _keep_alive(interval: int = 300) -> None:
+    """定時 ping 自己的公開 URL，防止 Render free tier spin down。"""
+    hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    if not hostname:
+        logger.info("RENDER_EXTERNAL_HOSTNAME 未設定，跳過 keep-alive（非 Render 環境）")
+        return
+    url = f"https://{hostname}/health"
+    logger.info("keep-alive 啟動，每 %d 秒 ping %s", interval, url)
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                resp = await client.get(url, timeout=10)
+                logger.debug("keep-alive ping: %s", resp.status_code)
+            except Exception as e:
+                logger.warning("keep-alive ping 失敗: %s", e)
 
 
 @asynccontextmanager
@@ -75,7 +97,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"LINE client warmup skipped: {e}")
 
+    # 啟動 keep-alive task（僅 Render 環境生效）
+    keep_alive_task = asyncio.create_task(_keep_alive())
+
     yield
+
+    # 關閉 keep-alive
+    keep_alive_task.cancel()
+    try:
+        await keep_alive_task
+    except asyncio.CancelledError:
+        pass
 
     # Shutdown
     logger.info("Shutting down application")
@@ -116,13 +148,21 @@ app.include_router(webhook_router)
 
 @app.get("/health")
 async def health_check() -> dict[str, Any]:
-    """Health check endpoint.
+    """Health check endpoint，兼作 DB 連線池保溫。"""
+    from sqlalchemy import text
 
-    Returns:
-        Status information for monitoring
-    """
+    from src.database import get_session
+
+    db_ok = False
+    try:
+        async with get_session() as session:
+            await session.execute(text("SELECT 1"))
+            db_ok = True
+    except Exception:
+        pass
     return {
-        "status": "ok",
+        "status": "ok" if db_ok else "degraded",
+        "db": db_ok,
         "version": "0.1.0",
         "environment": settings.app_env,
     }
