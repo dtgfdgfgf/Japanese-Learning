@@ -8,7 +8,9 @@ T038: Wire up "分析" command to ExtractorService
 T049: Wire up "練習" command to PracticeService
 """
 
+import asyncio
 import logging
+import os
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
 
@@ -88,13 +90,39 @@ async def handle_webhook(
         logger.warning("Failed to parse LINE events")
         raise HTTPException(status_code=400, detail="Invalid signature") from None
 
+    # Production：背景處理，立即回 200 避免 LINE webhook timeout（冷啟動防護）
+    # 測試：同步等待，確保 mock assert 正確
+    background = os.environ.get("RENDER_EXTERNAL_HOSTNAME") is not None
+
     for event in events:
         if isinstance(event, MessageEvent):
-            await handle_message_event(event)
+            if background:
+                asyncio.create_task(_safe_handle_message(event))
+            else:
+                await handle_message_event(event)
         elif isinstance(event, PostbackEvent):
-            await handle_postback_event(event)
+            if background:
+                asyncio.create_task(_safe_handle_postback(event))
+            else:
+                await handle_postback_event(event)
 
     return {"status": "ok"}
+
+
+async def _safe_handle_message(event: MessageEvent) -> None:
+    """背景安全處理 message event，確保例外不會遺失。"""
+    try:
+        await handle_message_event(event)
+    except Exception as e:
+        logger.exception(f"Background message handler failed: {e}")
+
+
+async def _safe_handle_postback(event: PostbackEvent) -> None:
+    """背景安全處理 postback event，確保例外不會遺失。"""
+    try:
+        await handle_postback_event(event)
+    except Exception as e:
+        logger.exception(f"Background postback handler failed: {e}")
 
 
 async def handle_message_event(event: MessageEvent) -> None:

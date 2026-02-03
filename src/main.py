@@ -26,8 +26,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def _keep_alive(interval: int = 300) -> None:
-    """定時 ping 自己的公開 URL，防止 Render free tier spin down。"""
+async def _keep_alive(interval: int = 240) -> None:
+    """定時 ping 自己的公開 URL，防止 Render free tier spin down。
+
+    Render free tier 約 15 分鐘無外部流量就會 spin down。
+    透過經由外部 URL 的 self-ping 模擬外部流量保持活躍。
+    首次 ping 延遲 30 秒（等 server ready），之後每 interval 秒一次。
+    """
     hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
     if not hostname:
         logger.info("RENDER_EXTERNAL_HOSTNAME 未設定，跳過 keep-alive（非 Render 環境）")
@@ -36,14 +41,17 @@ async def _keep_alive(interval: int = 300) -> None:
     logger.info("keep-alive 啟動，每 %d 秒 ping %s", interval, url)
     import httpx
 
+    # 首次延遲較短，確保 server 完全啟動後盡快開始 ping
+    await asyncio.sleep(30)
+
     async with httpx.AsyncClient() as client:
         while True:
-            await asyncio.sleep(interval)
             try:
                 resp = await client.get(url, timeout=10)
                 logger.debug("keep-alive ping: %s", resp.status_code)
             except Exception as e:
                 logger.warning("keep-alive ping 失敗: %s", e)
+            await asyncio.sleep(interval)
 
 
 @asynccontextmanager
