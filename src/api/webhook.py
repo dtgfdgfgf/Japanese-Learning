@@ -379,7 +379,8 @@ async def _dispatch_command(
     if command_type == CommandType.HELP:
         from src.templates.messages import MODE_LABELS
         mode_label = MODE_LABELS.get(mode, mode)
-        return f"{Messages.HELP}\n\n⚙️ 目前模式：{mode_label}"
+        lang_label = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
+        return f"{Messages.HELP}\n\n⚙️ 目前模式：{mode_label}｜學習語言：{lang_label}"
 
     if command_type == CommandType.PRIVACY:
         return Messages.PRIVACY
