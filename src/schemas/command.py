@@ -14,6 +14,7 @@ class CommandType(str, Enum):
     """Supported command types."""
 
     SAVE = "save"  # 入庫
+    CONFIRM_SAVE = "confirm_save"  # 確認入庫（輸入「1」）
     ANALYZE = "analyze"  # 分析
     PRACTICE = "practice"  # 練習
     SEARCH = "search"  # 查詢

@@ -43,6 +43,16 @@ class UserStateModel(Base):
         nullable=True,
         comment="清空資料確認請求時間",
     )
+    pending_save_content: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="待確認入庫的內容",
+    )
+    pending_save_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="待確認入庫設定時間",
+    )
 
     def __repr__(self) -> str:
         return f"<UserStateModel(user_id={self.user_id[:8]}...)>"

@@ -231,10 +231,60 @@ class RouterService:
             )
             
             return response.content
-            
+
         except Exception as e:
             logger.error(f"Chat response generation failed: {e}")
             return Messages.ERROR_CHAT
+
+    async def get_word_explanation(
+        self,
+        word: str,
+        mode: str = "free",
+        target_lang: str = "ja",
+    ) -> str:
+        """取得單字解釋。
+
+        Args:
+            word: 要解釋的單字
+            mode: LLM mode (cheap/balanced/rigorous)
+            target_lang: 目標語言 (ja/en)
+
+        Returns:
+            單字解釋
+        """
+        if target_lang == "ja":
+            system_prompt = """你是一個專業的日語老師。請用繁體中文簡短解釋這個日文單字的意思。
+
+格式要求：
+- 先標注讀音（如有漢字）
+- 簡短解釋意思（1-2句話）
+- 如有常見用法可以簡單提及
+
+保持簡潔，不要太冗長。"""
+        else:
+            system_prompt = """你是一個專業的英語老師。請用繁體中文簡短解釋這個英文單字的意思。
+
+格式要求：
+- 標注發音（音標）
+- 簡短解釋意思（1-2句話）
+- 如有常見用法可以簡單提及
+
+保持簡潔，不要太冗長。"""
+
+        try:
+            response = await self.llm_client.complete_with_mode(
+                mode=mode,
+                system_prompt=system_prompt,
+                user_message=word,
+                temperature=0.3,
+                max_tokens=300,
+            )
+
+            return response.content
+
+        except Exception as e:
+            logger.error(f"Word explanation generation failed: {e}")
+            return f"「{word}」"
 
 
 # Module-level singleton

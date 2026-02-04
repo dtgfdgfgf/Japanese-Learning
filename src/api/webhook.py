@@ -151,13 +151,14 @@ async def handle_message_event(event: MessageEvent) -> None:
     token = usage_context_var.set(usage_ctx)
 
     try:
-        # === Pre-dispatch session：讀取 profile + 檢查 session + 模式/語言切換 ===
+        # === Pre-dispatch session：讀取 profile + 檢查 session + pending_save + 模式/語言切換 ===
         current_mode = "free"
         target_lang = "ja"
         daily_used = 0
         daily_cap = 50000
         parsed = parse_command(text)
         has_session = False
+        has_pending_save = False
         try:
             async with get_session() as session:
                 # 讀取 profile（失敗不影響後續操作）
@@ -171,8 +172,12 @@ async def handle_message_event(event: MessageEvent) -> None:
                 except Exception as e:
                     logger.warning(f"Failed to load user profile, using defaults: {e}")
 
+                # 檢查 pending_save 狀態
+                user_state_repo = UserStateRepository(session)
+                has_pending_save = await user_state_repo.has_pending_save(hashed_uid)
+
                 # 練習 session 中的答案處理（需查 DB）
-                if parsed.command_type == CommandType.UNKNOWN:
+                if parsed.command_type == CommandType.UNKNOWN and not has_pending_save:
                     has_session = await has_active_session(session, hashed_uid)
 
                 # 模式切換需在 reply 前完成
@@ -202,7 +207,27 @@ async def handle_message_event(event: MessageEvent) -> None:
             logger.warning(f"Failed to open pre-dispatch session: {e}")
 
         # === Dispatch ===
-        if parsed.command_type == CommandType.UNKNOWN and has_session:
+        # 優先處理 pending_save 狀態
+        if parsed.command_type == CommandType.CONFIRM_SAVE and has_pending_save:
+            # 用戶輸入「1」確認入庫
+            response = await _handle_confirm_save(hashed_uid, user_id)
+        elif has_pending_save and parsed.command_type != CommandType.CONFIRM_SAVE:
+            # 有 pending_save 但輸入非「1」→ 清除狀態，處理新輸入
+            async with get_session() as session:
+                user_state_repo = UserStateRepository(session)
+                await user_state_repo.clear_pending_save(hashed_uid)
+            # 繼續處理當前輸入
+            response = await _dispatch_command(
+                command=parsed,
+                line_user_id=user_id,
+                raw_text=text,
+                mode=current_mode,
+                target_lang=target_lang,
+            )
+        elif parsed.command_type == CommandType.CONFIRM_SAVE and not has_pending_save:
+            # 輸入「1」但無 pending_save → 視為普通輸入交給 Router
+            response = await _handle_unknown(user_id, text, current_mode, target_lang)
+        elif parsed.command_type == CommandType.UNKNOWN and has_session:
             response = await _handle_practice_answer(hashed_uid, text, current_mode, target_lang)
         elif parsed.command_type == CommandType.MODE_SWITCH:
             mode_key = _resolve_mode_key(parsed)
@@ -437,6 +462,27 @@ async def _handle_save(line_user_id: str) -> str:
     return result.message
 
 
+async def _handle_confirm_save(hashed_uid: str, line_user_id: str) -> str:
+    """處理確認入庫（用戶輸入「1」）。"""
+    async with get_session() as session:
+        user_state_repo = UserStateRepository(session)
+        pending_content = await user_state_repo.get_pending_save(hashed_uid)
+
+        if not pending_content:
+            return Messages.FALLBACK_UNKNOWN
+
+        service = CommandService(session)
+        result = await service.save_raw(
+            line_user_id=line_user_id,
+            content_text=pending_content,
+        )
+
+        await user_state_repo.clear_pending_save(hashed_uid)
+
+        # save_raw() 已回傳格式化訊息，直接使用
+        return result.message
+
+
 async def _handle_search(line_user_id: str, keyword: str | None) -> str:
     """處理查詢指令。"""
     if not keyword:
@@ -636,13 +682,34 @@ async def _handle_unknown(
         classification = await router_service.classify(raw_text, mode=mode, target_lang=target_lang)
 
         if classification.intent == IntentType.SAVE and classification.confidence >= 0.8:
-            async with get_session() as session:
-                service = CommandService(session)
-                result = await service.save_raw(
-                    line_user_id=line_user_id,
-                    content_text=raw_text,
+            # 判斷是否為短單字（根據語言調整閾值）
+            stripped_text = raw_text.strip()
+            if target_lang == "ja":
+                # 日文：通常 1-10 字元，設 15 為上限
+                is_short_word = len(stripped_text) <= 15
+            else:
+                # 英文：單字通常無空格且較短
+                is_short_word = len(stripped_text) <= 30 and ' ' not in stripped_text
+
+            if is_short_word:
+                # 短單字流程：解釋意思 + 詢問入庫
+                explanation = await router_service.get_word_explanation(
+                    raw_text.strip(), mode=mode, target_lang=target_lang
                 )
-            return f"{result.message}\n\n💡 輸入「分析」來抽取單字和文法"
+                # 設定 pending_save 狀態
+                async with get_session() as session:
+                    user_state_repo = UserStateRepository(session)
+                    await user_state_repo.set_pending_save(hashed_user_id, raw_text.strip())
+                return Messages.format("WORD_EXPLANATION", explanation=explanation)
+            else:
+                # 長文本：直接入庫
+                async with get_session() as session:
+                    service = CommandService(session)
+                    result = await service.save_raw(
+                        line_user_id=line_user_id,
+                        content_text=raw_text,
+                    )
+                return f"{result.message}\n\n💡 輸入「分析」來抽取單字和文法"
 
         if classification.intent == IntentType.CHAT:
             response = await router_service.get_chat_response(raw_text, mode=mode, target_lang=target_lang)

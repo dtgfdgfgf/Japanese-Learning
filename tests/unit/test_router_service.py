@@ -279,7 +279,74 @@ class TestChatResponse:
         service = RouterService()
         service.llm_client = MagicMock()
         service.llm_client.complete_with_mode = AsyncMock(side_effect=Exception("Error"))
-        
+
         response = await service.get_chat_response("test")
-        
+
         assert "抱歉" in response or "無法" in response
+
+
+class TestWordExplanation:
+    """Tests for word explanation generation."""
+
+    @pytest.mark.asyncio
+    async def test_japanese_word_explanation(self):
+        """日文單字解釋正常回傳。"""
+        service = RouterService()
+        service.llm_client = MagicMock()
+        service.llm_client.complete_with_mode = AsyncMock(
+            return_value=_create_llm_response_mock(
+                "【たべる】\n吃的意思。例：ご飯を食べる（吃飯）"
+            )
+        )
+
+        response = await service.get_word_explanation("食べる", target_lang="ja")
+
+        assert response
+        assert len(response) > 0
+        # 確認 LLM 被呼叫且有設定 max_tokens
+        call_kwargs = service.llm_client.complete_with_mode.call_args.kwargs
+        assert call_kwargs.get("max_tokens") == 300
+
+    @pytest.mark.asyncio
+    async def test_english_word_explanation(self):
+        """英文單字解釋正常回傳。"""
+        service = RouterService()
+        service.llm_client = MagicMock()
+        service.llm_client.complete_with_mode = AsyncMock(
+            return_value=_create_llm_response_mock(
+                "/træn'sɛndənt/\n超越的、卓越的。常用於形容超凡脫俗的事物。"
+            )
+        )
+
+        response = await service.get_word_explanation("transcendent", target_lang="en")
+
+        assert response
+        assert len(response) > 0
+
+    @pytest.mark.asyncio
+    async def test_word_explanation_error_fallback(self):
+        """LLM 錯誤時回傳 fallback 訊息。"""
+        service = RouterService()
+        service.llm_client = MagicMock()
+        service.llm_client.complete_with_mode = AsyncMock(
+            side_effect=Exception("LLM Error")
+        )
+
+        response = await service.get_word_explanation("test")
+
+        # 應回傳包含原單字的 fallback
+        assert "test" in response
+
+    @pytest.mark.asyncio
+    async def test_word_explanation_uses_correct_mode(self):
+        """確認使用指定的 mode 呼叫 LLM。"""
+        service = RouterService()
+        service.llm_client = MagicMock()
+        service.llm_client.complete_with_mode = AsyncMock(
+            return_value=_create_llm_response_mock("解釋內容")
+        )
+
+        await service.get_word_explanation("word", mode="rigorous", target_lang="ja")
+
+        call_kwargs = service.llm_client.complete_with_mode.call_args.kwargs
+        assert call_kwargs.get("mode") == "rigorous"

@@ -15,7 +15,7 @@ from src.lib.security import hash_user_id
 from src.repositories.document_repo import DocumentRepository
 from src.repositories.raw_message_repo import RawMessageRepository
 from src.schemas.command import CommandResult, CommandType, ParsedCommand
-from src.templates.messages import Messages, format_save_success
+from src.templates.messages import Messages, format_save_success, truncate_content_preview
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Command patterns (case-insensitive)
 COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     # (pattern, command_type, requires_keyword)
+    (r"^1$", CommandType.CONFIRM_SAVE, False),  # 確認入庫
     (r"^入庫$", CommandType.SAVE, False),
     (r"^分析$", CommandType.ANALYZE, False),
     (r"^練習$", CommandType.PRACTICE, False),
@@ -149,13 +150,13 @@ class CommandService:
                 parse_status="deferred",
             )
 
-            # Format short doc_id for display
-            short_id = str(document.doc_id)[:8]
-
             logger.info(f"Saved raw message and document: {document.doc_id}")
 
+            # 使用截斷內容作為預覽
+            content_preview = truncate_content_preview(content_text)
+
             return CommandResult.ok(
-                message=format_save_success(short_id),
+                message=format_save_success(content_preview),
                 doc_id=document.doc_id,
                 raw_id=raw_message.raw_id,
             )

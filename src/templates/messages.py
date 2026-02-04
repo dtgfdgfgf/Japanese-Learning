@@ -62,9 +62,10 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "ERROR_SAVE": "入庫失敗，請稍後再試",
     
     # ========== 入庫相關 ==========
-    "SAVE_SUCCESS": "已入庫：#{short_id}",
-    "SAVE_SUCCESS_WITH_HINT": "已入庫：#{short_id}\n\n💡 輸入「分析」來抽取單字和文法",
+    "SAVE_SUCCESS": "已入庫：{content_preview}",
+    "SAVE_SUCCESS_WITH_HINT": "已入庫：{content_preview}\n\n💡 輸入「分析」來抽取單字和文法",
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
+    "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，輸入「1」即可入庫，輸入其他內容將視為新查詢",
     
     # ========== 分析相關 ==========
     "ANALYZE_NO_DEFERRED": "沒有待分析的素材 📭\n請先「入庫」一些學習內容",
@@ -390,10 +391,18 @@ def get_message(
 # 格式化輔助函數
 # ============================================================================
 
-def format_save_success(short_id: str, with_hint: bool = False) -> str:
+def truncate_content_preview(content: str, max_length: int = 30) -> str:
+    """截斷內容為預覽文字。"""
+    first_line = content.split('\n')[0].strip()
+    if len(first_line) <= max_length:
+        return first_line
+    return first_line[:max_length] + "..."
+
+
+def format_save_success(content_preview: str, with_hint: bool = False) -> str:
     """格式化入庫成功訊息。"""
     key = "SAVE_SUCCESS_WITH_HINT" if with_hint else "SAVE_SUCCESS"
-    return Messages.format(key, short_id=short_id)
+    return Messages.format(key, content_preview=content_preview)
 
 
 def format_search_no_result(keyword: str) -> str:
