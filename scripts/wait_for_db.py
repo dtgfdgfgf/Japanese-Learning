@@ -15,7 +15,8 @@ async def wait_for_db(max_retries: int = 30, delay: float = 2.0) -> bool:
         print("DATABASE_URL not set, skipping DB wait")
         return True
 
-    # asyncpg 需要 postgresql:// 而非 postgres://
+    # asyncpg 只接受 postgresql:// 或 postgres://，需移除 SQLAlchemy driver 後綴
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
 
