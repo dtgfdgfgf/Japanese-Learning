@@ -716,7 +716,10 @@ async def _handle_unknown(
             return response
 
         if classification.intent == IntentType.HELP:
-            return Messages.HELP
+            from src.templates.messages import MODE_LABELS
+            mode_label = MODE_LABELS.get(mode, mode)
+            lang_label = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
+            return f"{Messages.HELP}\n\n⚙️ 目前模式：{mode_label}｜學習語言：{lang_label}"
 
         if classification.intent == IntentType.SEARCH and classification.keyword:
             async with get_session() as session:
