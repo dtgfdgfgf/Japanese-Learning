@@ -27,7 +27,7 @@ async def wait_for_db(max_retries: int = 30, delay: float = 2.0) -> bool:
             print(f"DB ready (attempt {attempt}/{max_retries})")
             return True
         except Exception as e:
-            print(f"DB not ready (attempt {attempt}/{max_retries}): {type(e).__name__}")
+            print(f"DB not ready (attempt {attempt}/{max_retries}): {type(e).__name__}: {e}")
             if attempt < max_retries:
                 await asyncio.sleep(delay)
 
