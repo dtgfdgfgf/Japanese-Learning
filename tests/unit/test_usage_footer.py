@@ -16,9 +16,10 @@ from src.templates.messages import (
 class TestCalculateCost:
     """測試花費計算。"""
 
-    def test_free_mode_zero_cost(self):
-        """免費模式花費應為 0。"""
-        assert calculate_cost("free", 1000, 500) == 0.0
+    def test_free_mode_cost(self):
+        """免費模式：gemini-3-pro-preview $2/$12 per MTok。"""
+        # 1000 in + 500 out: (1000*2 + 500*12) / 1M = 0.008
+        assert calculate_cost("free", 1000, 500) == pytest.approx(0.008)
 
     def test_cheap_mode_cost(self):
         """便宜模式：$3/$15 per MTok。"""

@@ -84,9 +84,9 @@ usage_context_var: ContextVar[UsageContext | None] = ContextVar(
 
 # 模式 → provider / model 映射
 MODE_MODEL_MAP: dict[str, dict[str, str]] = {
-    "free": {"provider": "google", "model": "gemini-2.5-flash-lite"},
+    "free": {"provider": "google", "model": "gemini-3-pro-preview"},
     "cheap": {"provider": "anthropic", "model": "claude-sonnet-4-5-20250929"},
-    "rigorous": {"provider": "anthropic", "model": "claude-opus-4-5-20251101"},
+    "rigorous": {"provider": "anthropic", "model": "claude-opus-4-6"},
 }
 
 
@@ -109,7 +109,7 @@ class LLMClient:
     """
 
     # Model configurations
-    ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+    ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
     OPENAI_MODEL = "gpt-4o-mini"
 
     def __init__(
@@ -295,7 +295,7 @@ class LLMClient:
         user_message: str,
         max_tokens: int,
         temperature: float,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3-pro-preview",
     ) -> dict[str, Any]:
         """Call Google Gemini API (同步包裝為 async)。
 

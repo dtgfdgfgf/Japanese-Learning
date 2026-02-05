@@ -19,7 +19,8 @@ from src.repositories.base import BaseRepository
 # 參考：https://openai.com/pricing, https://anthropic.com/pricing
 PRICING: dict[str, dict[str, dict[str, float]]] = {
     "anthropic": {
-        "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
+        "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+        "claude-opus-4-6": {"input": 5.0, "output": 25.0},
         # 預設定價 (未知模型使用)
         "default": {"input": 3.0, "output": 15.0},
     },
@@ -30,10 +31,9 @@ PRICING: dict[str, dict[str, dict[str, float]]] = {
         "default": {"input": 0.15, "output": 0.60},
     },
     "google": {
-        "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
-        "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},
+        "gemini-3-pro-preview": {"input": 2.0, "output": 12.0},
         # 預設定價
-        "default": {"input": 0.15, "output": 0.60},
+        "default": {"input": 2.0, "output": 12.0},
     },
 }
 

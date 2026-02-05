@@ -469,9 +469,9 @@ MODE_LABELS: dict[str, str] = {
 
 # 每模式的 input/output 每百萬 token 單價（USD）
 MODE_PRICING: dict[str, tuple[float, float]] = {
-    "free": (0.0, 0.0),
+    "free": (2.0, 12.0),        # gemini-3-pro-preview: $2/$12 per MTok
     "cheap": (3.0, 15.0),       # claude-sonnet-4-5: $3/$15 per MTok
-    "rigorous": (5.0, 25.0),    # claude-opus-4-5: $5/$25 per MTok
+    "rigorous": (5.0, 25.0),    # claude-opus-4-6: $5/$25 per MTok
 }
 
 

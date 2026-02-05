@@ -21,7 +21,7 @@ class TestModeModelMap:
 
     def test_free_maps_to_google(self):
         assert MODE_MODEL_MAP["free"]["provider"] == "google"
-        assert MODE_MODEL_MAP["free"]["model"] == "gemini-2.5-flash-lite"
+        assert MODE_MODEL_MAP["free"]["model"] == "gemini-3-pro-preview"
 
     def test_cheap_maps_to_anthropic(self):
         assert MODE_MODEL_MAP["cheap"]["provider"] == "anthropic"
@@ -29,7 +29,7 @@ class TestModeModelMap:
 
     def test_rigorous_maps_to_anthropic(self):
         assert MODE_MODEL_MAP["rigorous"]["provider"] == "anthropic"
-        assert MODE_MODEL_MAP["rigorous"]["model"] == "claude-opus-4-5-20251101"
+        assert MODE_MODEL_MAP["rigorous"]["model"] == "claude-opus-4-6"
 
     def test_all_modes_have_model(self):
         for mode, mapping in MODE_MODEL_MAP.items():
@@ -157,7 +157,7 @@ class TestCallProviderDispatch:
         })
 
         result = await client._call_provider(
-            provider="google", model="gemini-2.5-flash-lite",
+            provider="google", model="gemini-3-pro-preview",
             system_prompt="s", user_message="u", max_tokens=100, temperature=0.5,
         )
         assert result["content"] == "google"

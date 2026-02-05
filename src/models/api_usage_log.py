@@ -23,7 +23,7 @@ class ApiUsageLog(Base):
         log_id: 唯一識別碼 (UUID)
         user_id: Hashed LINE user ID
         provider: LLM 提供者 (anthropic/openai)
-        model: 模型名稱 (e.g., claude-sonnet-4-20250514)
+        model: 模型名稱 (e.g., claude-sonnet-4-5-20250929)
         operation: 操作類型 (extraction/practice/router)
         input_tokens: 輸入 token 數量
         output_tokens: 輸出 token 數量
