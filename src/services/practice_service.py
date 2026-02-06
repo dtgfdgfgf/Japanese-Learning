@@ -427,6 +427,7 @@ class PracticeService:
         current_question = practice_session.current_question
         if not current_question:
             practice_session.is_complete = True
+            await self.session_service.clear_session(user_id)
             return None, practice_session.format_result_message()
 
         # Grade answer — GRAMMAR_USAGE 使用模糊判定（答案需包含 pattern）

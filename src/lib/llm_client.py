@@ -172,6 +172,7 @@ class LLMClient:
                 user_message=user_message,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                json_mode=json_mode,
             )
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -229,15 +230,23 @@ class LLMClient:
         user_message: str,
         max_tokens: int,
         temperature: float,
+        json_mode: bool = False,
+        model: str | None = None,
     ) -> dict[str, Any]:
         """Call Anthropic API with timeout.
+
+        Args:
+            json_mode: Anthropic 無原生 json_mode，但傳入此參數以保持介面一致。
+                       JSON 輸出由 system prompt 指示控制。
+            model: 指定 model，預設使用 ANTHROPIC_MODEL。
 
         Returns:
             Dict with content, input_tokens, output_tokens
         """
+        use_model = model or self.ANTHROPIC_MODEL
         async with asyncio.timeout(self.timeout):
             response = await self.anthropic_client.messages.create(
-                model=self.ANTHROPIC_MODEL,
+                model=use_model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 system=system_prompt,
@@ -296,8 +305,12 @@ class LLMClient:
         max_tokens: int,
         temperature: float,
         model: str = "gemini-3-pro-preview",
+        json_mode: bool = False,
     ) -> dict[str, Any]:
         """Call Google Gemini API (同步包裝為 async)。
+
+        Args:
+            json_mode: 為 True 時設定 response_mime_type="application/json"。
 
         Returns:
             Dict with content, input_tokens, output_tokens
@@ -305,13 +318,16 @@ class LLMClient:
         if not self._gemini_configured:
             raise RuntimeError("Gemini API key not configured")
         def _sync_call() -> dict[str, Any]:
+            gen_config_kwargs: dict[str, Any] = {
+                "max_output_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            if json_mode:
+                gen_config_kwargs["response_mime_type"] = "application/json"
             client = genai.GenerativeModel(
                 model_name=model,
                 system_instruction=system_prompt,
-                generation_config=genai.GenerationConfig(
-                    max_output_tokens=max_tokens,
-                    temperature=temperature,
-                ),
+                generation_config=genai.GenerationConfig(**gen_config_kwargs),
             )
             response = client.generate_content(user_message)
             # token 使用量
@@ -394,6 +410,8 @@ class LLMClient:
                 user_message=user_message,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                json_mode=json_mode,
+                model=model,
             )
         elif provider == "openai":
             return await self._call_openai(
@@ -410,6 +428,7 @@ class LLMClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 model=model,
+                json_mode=json_mode,
             )
         else:
             raise ValueError(f"Unknown provider: {provider}")
@@ -440,7 +459,14 @@ class LLMClient:
         if content.endswith("```"):
             content = content[:-3]
 
-        parsed = json.loads(content.strip())
+        try:
+            parsed = json.loads(content.strip())
+        except json.JSONDecodeError:
+            logger.error(
+                "LLM JSON parse failed (provider=%s, model=%s): %s",
+                response.provider, response.model, content[:200],
+            )
+            raise
 
         trace = LLMTrace(
             model=response.model,
@@ -493,7 +519,14 @@ class LLMClient:
         if content.endswith("```"):
             content = content[:-3]
 
-        parsed = json.loads(content.strip())
+        try:
+            parsed = json.loads(content.strip())
+        except json.JSONDecodeError:
+            logger.error(
+                "LLM JSON parse failed (provider=%s, model=%s): %s",
+                response.provider, response.model, content[:200],
+            )
+            raise
 
         trace = LLMTrace(
             model=response.model,

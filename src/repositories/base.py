@@ -28,6 +28,12 @@ class BaseRepository(Generic[ModelT]):
     model: type[ModelT]
     pk_field: str = "id"  # Override in subclass if different
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # 跳過尚未設定 model 的中間抽象類別
+        if "model" in cls.__dict__ and cls.__dict__["model"] is None:
+            raise TypeError(f"{cls.__name__} must set 'model' class variable")
+
     def __init__(self, session: AsyncSession):
         """Initialize repository with database session.
 

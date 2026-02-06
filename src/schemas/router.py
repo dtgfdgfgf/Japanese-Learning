@@ -72,7 +72,7 @@ class RouterClassification(BaseModel):
     """Internal classification result from LLM."""
     
     intent: str = Field(..., description="Intent string from LLM")
-    confidence: float = Field(..., description="Confidence value")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence value")
     keyword: Optional[str] = Field(default=None)
     reason: Optional[str] = Field(default=None)
     

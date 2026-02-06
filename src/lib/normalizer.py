@@ -189,12 +189,8 @@ def detect_language(text: str) -> str:
         return "ja"
     elif english_ratio >= 0.5:
         return "en"
-    elif japanese_ratio > 0 and english_ratio > 0:
-        return "mixed"
     elif japanese_ratio > 0:
         return "mixed"
-    elif english_ratio > 0:
-        return "en"
     else:
         return "unknown"
 

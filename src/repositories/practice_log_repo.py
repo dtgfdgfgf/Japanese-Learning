@@ -6,7 +6,7 @@ DoD: 可 create/get practice_log；get_by_item 回傳該 item 的練習紀錄
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import Integer, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.practice_log import PracticeLog
@@ -185,7 +185,7 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
             select(
                 PracticeLog.item_id,
                 (
-                    func.sum(func.cast(~PracticeLog.is_correct, func.Integer))
+                    func.sum(func.cast(~PracticeLog.is_correct, Integer))
                     / func.count()
                 ).label("error_rate"),
             )
@@ -194,13 +194,13 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
             .where(PracticeLog.created_at >= cutoff)
             .group_by(PracticeLog.item_id)
             .having(
-                func.sum(func.cast(~PracticeLog.is_correct, func.Integer))
+                func.sum(func.cast(~PracticeLog.is_correct, Integer))
                 / func.count()
                 >= threshold
             )
             .order_by(
                 (
-                    func.sum(func.cast(~PracticeLog.is_correct, func.Integer))
+                    func.sum(func.cast(~PracticeLog.is_correct, Integer))
                     / func.count()
                 ).desc()
             )

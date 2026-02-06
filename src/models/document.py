@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -50,7 +51,7 @@ class Document(Base):
     )
     raw_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("raw_messages.raw_id", ondelete="CASCADE"),
+        ForeignKey("raw_messages.raw_id", ondelete="RESTRICT"),
         nullable=False,
         comment="Reference to source raw_message",
     )
@@ -114,6 +115,7 @@ class Document(Base):
         Boolean,
         nullable=False,
         default=False,
+        server_default=sa.false(),
         comment="Soft delete flag",
     )
 

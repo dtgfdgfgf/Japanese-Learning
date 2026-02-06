@@ -152,6 +152,7 @@ class DocumentRepository(BaseRepository[Document]):
         stmt = (
             update(Document)
             .where(Document.doc_id == doc_id)
+            .where(Document.is_deleted.is_(False))
             .values(**update_values)
             .returning(Document)
         )

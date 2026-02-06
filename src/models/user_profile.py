@@ -6,7 +6,8 @@ daily_used_tokens 透過原子 SQL increment 更新，避免競態條件。
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func
+import sqlalchemy as sa
+from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.database import Base
@@ -75,6 +76,13 @@ class UserProfile(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+        comment="Soft delete flag",
     )
 
     def __repr__(self) -> str:

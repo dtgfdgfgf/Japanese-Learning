@@ -5,18 +5,14 @@ DoD: Model 定義符合 plan.md Data Model；FK 關聯 items 正確
 """
 
 from datetime import datetime
-from typing import Literal
 from uuid import uuid4
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.database import Base
-
-
-# Type aliases
-PracticeType = Literal["vocab_recall", "grammar_cloze"]
 
 
 class PracticeLog(Base):
@@ -53,7 +49,7 @@ class PracticeLog(Base):
     )
     item_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("items.item_id", ondelete="CASCADE"),
+        ForeignKey("items.item_id", ondelete="RESTRICT"),
         nullable=False,
         comment="Reference to practiced item",
     )
@@ -96,7 +92,7 @@ class PracticeLog(Base):
         Boolean,
         nullable=False,
         default=False,
-        server_default=func.literal(False),
+        server_default=sa.false(),
         comment="Soft delete flag",
     )
 

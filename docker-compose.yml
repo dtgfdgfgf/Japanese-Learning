@@ -1,8 +1,6 @@
 # T102: Create docker-compose.yml for local development
 # DoD: `docker-compose up` 啟動 app + postgres；可本地測試完整流程
 
-version: '3.8'
-
 services:
   app:
     build:
@@ -17,7 +15,7 @@ services:
       - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - USER_ID_SALT=${USER_ID_SALT:-default_dev_salt_change_in_production}
+      - USER_ID_SALT=${USER_ID_SALT:?USER_ID_SALT must be set - see .env.example}
       - DEBUG=${DEBUG:-true}
       - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
     depends_on:

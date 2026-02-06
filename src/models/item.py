@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
+import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -63,7 +64,7 @@ class Item(Base):
     )
     doc_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey("documents.doc_id", ondelete="CASCADE"),
+        ForeignKey("documents.doc_id", ondelete="RESTRICT"),
         nullable=False,
         comment="Reference to source document",
     )
@@ -103,6 +104,7 @@ class Item(Base):
         Boolean,
         nullable=False,
         default=False,
+        server_default=sa.false(),
         comment="Soft delete flag",
     )
 

@@ -65,7 +65,17 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "SAVE_SUCCESS": "已入庫：{content_preview}",
     "SAVE_SUCCESS_WITH_HINT": "已入庫：{content_preview}\n\n💡 輸入「分析」來抽取單字和文法",
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
-    "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，輸入「1」即可入庫，輸入其他內容將視為新查詢",
+    "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，請在 5 分鐘內輸入「1」即可入庫，輸入其他內容將視為新查詢\n若非你要查的字，請重新輸入正確的拼寫",
+    "PENDING_EXPIRED": "沒有待入庫的內容（可能已超過 5 分鐘）。\n請重新輸入想查詢的單字。",
+    "PENDING_DISCARDED": "⚠️「{word}」的入庫已取消。",
+    "INPUT_NO_MEANINGFUL_CONTENT": "請輸入文字內容（日文或英文），純符號或 emoji 無法處理 🙏\n輸入「說明」查看使用方式",
+    "COMMAND_SUGGESTION": "💡 你可能想輸入指令「{command}」\n如果不是，請重新輸入你想查詢的內容",
+    "INPUT_URL_DETECTED": "目前不支援直接輸入 URL 🔗\n請複製文章的文字內容後貼上",
+    "INPUT_LIKELY_ROMAJI": "看起來是日語的羅馬字拼音 ✏️\n請開啟日文輸入法後重新輸入，或直接貼上日文文字",
+    "PENDING_WRONG_NUMBER": "只有輸入「1」可以確認入庫喔 ☝️\n輸入「1」入庫，或輸入其他單字繼續查詢",
+    "INPUT_LONG_TEXT_SAVED": "📄 文章較長（{length} 字），已直接入庫\n\n💡 輸入「分析」來抽取單字和文法",
+    "INPUT_NON_TEXT": "目前僅支援文字訊息 📝\n請將想查詢的內容以文字方式輸入",
+    "INPUT_UNSUPPORTED_LANG": "目前支援日文和英文內容 🌐\n請輸入日文或英文的學習素材",
     
     # ========== 分析相關 ==========
     "ANALYZE_NO_DEFERRED": "沒有待分析的素材 📭\n請先「入庫」一些學習內容",
@@ -87,6 +97,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     ),
     "PRACTICE_GENERATE_FAILED": "無法產生練習題，請稍後再試",
     "PRACTICE_NO_ACTIVE_SESSION": "沒有進行中的練習，請先輸入「練習」開始",
+    "PRACTICE_EXIT": "已結束練習 📝\n可隨時輸入「練習」重新開始。",
+    "PRACTICE_EXIT_NO_SESSION": "目前沒有進行中的練習。",
     "PRACTICE_HEADER": "📝 今日練習題：\n",
     "PRACTICE_FOOTER": "\n請依序回答，輸入答案即可 ✍️",
     "PRACTICE_ANSWER_CORRECT": "✅ 正確！",
@@ -148,6 +160,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 • 入庫 - 儲存上一則訊息的學習內容
 • 分析 - 分析已入庫的內容，抽取單字/文法
 • 練習 - 開始練習題
+• 結束練習 - 中途結束練習
 • 查詢 <關鍵字> - 搜尋已入庫的內容
 • 統計 - 查看學習進度
 • 用量 - 查看 API 使用量與費用
@@ -276,6 +289,7 @@ class Messages:
     
     # 入庫
     SAVE_NO_CONTENT: str = _MESSAGES_ZH_TW["SAVE_NO_CONTENT"]
+    PENDING_EXPIRED: str = _MESSAGES_ZH_TW["PENDING_EXPIRED"]
     
     # 分析
     ANALYZE_NO_DEFERRED: str = _MESSAGES_ZH_TW["ANALYZE_NO_DEFERRED"]

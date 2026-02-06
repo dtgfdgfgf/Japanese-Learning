@@ -168,12 +168,11 @@ def format_extractor_request(
 
 Maximum items to extract: {max_items}
 
----
-INPUT TEXT:
+<user_input>
 {truncated}
----
+</user_input>
 
-Extract all learnable vocabulary and grammar items from the text above. Return JSON only."""
+Extract all learnable vocabulary and grammar items from the text enclosed in <user_input> tags above. Return JSON only."""
 
 
 def get_system_prompt(max_items: int = 20, lang: str = "ja") -> str:

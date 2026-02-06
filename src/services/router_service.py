@@ -5,9 +5,12 @@ T082: Implement RouterService in src/services/router_service.py
 DoD: classify(message) 回傳 RouterResponse；confidence < 0.5 觸發 fallback
 """
 
+from __future__ import annotations
+
 import json
 import logging
-from typing import Optional
+
+from pydantic import ValidationError
 
 from src.lib.llm_client import get_llm_client
 from src.prompts.router import format_router_request, get_system_prompt
@@ -32,7 +35,7 @@ class RouterService:
     async def classify(
         self,
         message: str,
-        context: Optional[str] = None,
+        context: str | None = None,
         mode: str = "free",
         target_lang: str = "ja",
     ) -> RouterResponse:
@@ -59,16 +62,12 @@ class RouterService:
             )
             response_text = response.content
             
-            # Parse response
+            # 解析回應
             return self._parse_llm_response(response_text, message, target_lang=target_lang)
             
         except Exception as e:
-            logger.error(f"Router classification failed: {e}")
-            return RouterResponse(
-                intent=IntentType.UNKNOWN,
-                confidence=0.0,
-                reason=f"Classification error: {type(e).__name__}",
-            )
+            logger.error(f"Router classification failed, using heuristic: {e}")
+            return self._heuristic_classify(message, target_lang=target_lang)
     
     def _parse_llm_response(
         self,
@@ -87,7 +86,7 @@ class RouterService:
             Parsed RouterResponse
         """
         try:
-            # Extract JSON from response
+            # 從 LLM 回應中提取 JSON
             json_str = self._extract_json(response_text)
             data = json.loads(json_str)
             
@@ -100,10 +99,10 @@ class RouterService:
             
             return classification.to_response()
             
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
+        except (json.JSONDecodeError, KeyError, ValueError, ValidationError) as e:
             logger.warning(f"Failed to parse router response: {e}")
             
-            # Try heuristic classification as fallback
+            # JSON 解析失敗，使用啟發式分類
             return self._heuristic_classify(original_message, target_lang=target_lang)
     
     def _extract_json(self, text: str) -> str:
@@ -115,7 +114,7 @@ class RouterService:
         Returns:
             JSON string
         """
-        # Try to find JSON block
+        # 嘗試從 code block 提取 JSON
         if "```json" in text:
             start = text.find("```json") + 7
             end = text.find("```", start)
@@ -143,24 +142,52 @@ class RouterService:
         raise ValueError("No JSON found in response")
     
     def _heuristic_classify(self, message: str, target_lang: str = "ja") -> RouterResponse:
-        """Apply simple heuristics when LLM parsing fails.
-        
-        Args:
-            message: User message
-            
-        Returns:
-            Heuristic-based RouterResponse
-        """
-        message_lower = message.lower().strip()
+        """依規則啟發式分類使用者意圖（LLM 解析失敗時的 fallback）。"""
+        stripped = message.strip()
+        is_single_token = len(stripped.split()) == 1
 
-        # 根據目標語言檢查是否為學習素材
-        japanese_chars = sum(1 for c in message if '\u3040' <= c <= '\u309f' or '\u30a0' <= c <= '\u30ff' or '\u4e00' <= c <= '\u9fff')
+        # 字元統計
+        kana_chars = sum(
+            1 for c in message
+            if '\u3040' <= c <= '\u309f' or '\u30a0' <= c <= '\u30ff' or '\uff65' <= c <= '\uff9f'
+        )
+        cjk_chars = sum(1 for c in message if '\u4e00' <= c <= '\u9fff')
+        japanese_chars = kana_chars + cjk_chars
         ascii_alpha_chars = sum(1 for c in message if c.isascii() and c.isalpha())
         total_chars = max(len(message.replace(" ", "")), 1)
 
         japanese_ratio = japanese_chars / total_chars
         english_ratio = ascii_alpha_chars / total_chars
 
+        # 問句優先判斷
+        has_question = any(q in message for q in ["?", "？", "嗎", "什麼", "怎麼", "如何"])
+
+        # --- 短單字偵測（含跨語言備援） ---
+        if not has_question and is_single_token:
+            # 英文短單字：目標語言為英文時最短 1 字元，跨語言時最短 3 字元
+            en_min_len = 1 if target_lang == "en" else 3
+            if english_ratio > 0.8 and en_min_len <= len(stripped) <= 30:
+                return RouterResponse(
+                    intent=IntentType.SAVE,
+                    confidence=0.85,
+                    reason="Single English word detected (heuristic)",
+                )
+
+            # 日文短詞：有假名 → 高信心度；純漢字 → 可能是中文，降低信心度
+            if japanese_ratio >= 0.5 and len(stripped) <= 15:
+                conf = 0.85 if kana_chars > 0 else 0.7
+                reason = (
+                    "Short Japanese word/phrase detected (heuristic)"
+                    if kana_chars > 0
+                    else "Short CJK text, possibly Chinese (heuristic)"
+                )
+                return RouterResponse(
+                    intent=IntentType.SAVE,
+                    confidence=conf,
+                    reason=reason,
+                )
+
+        # --- 長文偵測 ---
         # 日文模式：多數日文字元 → save
         if target_lang == "ja" and japanese_ratio > 0.5 and len(message) > 10:
             return RouterResponse(
@@ -176,16 +203,16 @@ class RouterService:
                 confidence=0.6,
                 reason="Message contains significant English content",
             )
-        
-        # Check for question patterns
-        if any(q in message for q in ["?", "？", "嗎", "什麼", "怎麼", "如何"]):
+
+        # 問句 → chat
+        if has_question:
             return RouterResponse(
                 intent=IntentType.CHAT,
                 confidence=0.5,
                 reason="Message appears to be a question",
             )
-        
-        # Default to unknown
+
+        # 無法判斷
         return RouterResponse(
             intent=IntentType.UNKNOWN,
             confidence=0.3,
@@ -195,7 +222,7 @@ class RouterService:
     async def get_chat_response(
         self,
         message: str,
-        context: Optional[str] = None,
+        context: str | None = None,
         mode: str = "free",
         target_lang: str = "ja",
     ) -> str:
@@ -287,8 +314,8 @@ class RouterService:
             return f"「{word}」"
 
 
-# Module-level singleton
-_router_service: Optional[RouterService] = None
+# 模組層級 singleton
+_router_service: RouterService | None = None
 
 
 def get_router_service() -> RouterService:

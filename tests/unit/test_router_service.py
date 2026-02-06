@@ -7,11 +7,11 @@ DoD: Mock LLM 回應；驗證各 intent 分類；測試 fallback 觸發
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.schemas.router import IntentType, RouterResponse
+from src.schemas.router import IntentType
 from src.services.router_service import RouterService
 
 
@@ -133,16 +133,17 @@ class TestRouterService:
         assert result.needs_fallback is True
     
     @pytest.mark.asyncio
-    async def test_llm_error_returns_unknown(self, router_service):
-        """Test that LLM errors return unknown intent."""
+    async def test_llm_error_falls_back_to_heuristic(self, router_service):
+        """Test that LLM errors fall back to heuristic classification."""
         router_service.llm_client.complete_with_mode = AsyncMock(
             side_effect=Exception("LLM Error")
         )
-        
+
         result = await router_service.classify("test message")
-        
+
+        # heuristic 對短文本回傳 UNKNOWN，但 confidence > 0（非硬 0.0）
         assert result.intent == IntentType.UNKNOWN
-        assert result.confidence == 0.0
+        assert result.confidence > 0.0
     
     @pytest.mark.asyncio
     async def test_invalid_json_uses_heuristic(self, router_service):
@@ -208,6 +209,77 @@ class TestHeuristicClassification:
 
         assert result.intent != IntentType.SAVE
 
+    def test_english_word_save_in_ja_mode(self):
+        """日文模式下，英文短單字應透過跨語言規則判為 SAVE（Case 4 修復）。"""
+        service = RouterService()
+
+        result = service._heuristic_classify("sunshine", target_lang="ja")
+
+        assert result.intent == IntentType.SAVE
+        assert result.confidence >= 0.8
+
+    def test_english_word_save_in_ja_mode_3chars(self):
+        """日文模式下，3字元英文單字應判為 SAVE。"""
+        service = RouterService()
+
+        result = service._heuristic_classify("cat", target_lang="ja")
+
+        assert result.intent == IntentType.SAVE
+
+    def test_english_sentence_not_save_in_ja_mode_crosslang(self):
+        """日文模式下，含空格的英文句子不應被跨語言短單字規則匹配。"""
+        service = RouterService()
+
+        result = service._heuristic_classify(
+            "I love sushi",
+            target_lang="ja",
+        )
+
+        # 含空格 → 不匹配跨語言短單字規則 → 不會是 SAVE
+        assert result.intent != IntentType.SAVE
+
+    def test_japanese_word_save_in_en_mode(self):
+        """英文模式下，日文短詞應透過跨語言規則判為 SAVE。"""
+        service = RouterService()
+
+        result = service._heuristic_classify("食べる", target_lang="en")
+
+        assert result.intent == IntentType.SAVE
+        assert result.confidence >= 0.8
+
+    def test_english_question_not_save_in_ja_mode(self):
+        """日文模式下，英文問句不應判為 SAVE。"""
+        service = RouterService()
+
+        result = service._heuristic_classify("What does this mean?", target_lang="ja")
+
+        assert result.intent != IntentType.SAVE
+
+    def test_single_char_english_word_in_en_mode(self):
+        """英文模式下，單字元「I」應判為 SAVE（Case 10 修復）。"""
+        service = RouterService()
+
+        result = service._heuristic_classify("I", target_lang="en")
+
+        assert result.intent == IntentType.SAVE
+        assert result.confidence >= 0.8
+
+    def test_single_char_english_a_in_en_mode(self):
+        """英文模式下，單字元「a」應判為 SAVE。"""
+        service = RouterService()
+
+        result = service._heuristic_classify("a", target_lang="en")
+
+        assert result.intent == IntentType.SAVE
+
+    def test_single_kanji_in_ja_mode(self):
+        """日文模式下，單一漢字應判為 SAVE。"""
+        service = RouterService()
+
+        result = service._heuristic_classify("雨", target_lang="ja")
+
+        assert result.intent == IntentType.SAVE
+
     def test_router_prompt_uses_target_lang(self):
         """Router system prompt 依語言切換。"""
         from src.prompts.router import get_system_prompt
@@ -217,6 +289,15 @@ class TestHeuristicClassification:
 
         assert "日文" in ja_prompt
         assert "英文" in en_prompt
+
+    def test_mixed_language_boundary(self):
+        """Edge Case 22: 日英混合句 japanese_ratio=0.5 應判為 SAVE（>= 閾值）。"""
+        service = RouterService()
+
+        result = service._heuristic_classify("appleは美味しい", target_lang="ja")
+
+        assert result.intent == IntentType.SAVE
+        assert result.confidence >= 0.7
 
 
 class TestJsonExtraction:

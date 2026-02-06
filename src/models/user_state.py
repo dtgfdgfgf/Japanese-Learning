@@ -5,7 +5,8 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, Text
+import sqlalchemy as sa
+from sqlalchemy import Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.database import Base
@@ -52,6 +53,13 @@ class UserStateModel(Base):
         DateTime(timezone=True),
         nullable=True,
         comment="待確認入庫設定時間",
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+        comment="Soft delete flag",
     )
 
     def __repr__(self) -> str:

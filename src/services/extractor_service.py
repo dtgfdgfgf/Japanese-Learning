@@ -146,6 +146,15 @@ class ExtractorService:
             except Exception as e:
                 logger.error(f"Failed to save item {item.key}: {e}")
 
+        # 所有 item 都保存失敗 → 標記為 failed
+        if items and not saved_items:
+            await self._update_document_status(doc_id, "failed", lang)
+            return ExtractorResponse(
+                doc_id=doc_id,
+                items=[],
+                warnings=[f"All {len(items)} items failed to save"],
+            )
+
         # Update document status
         await self._update_document_status(doc_id, "parsed", lang)
 

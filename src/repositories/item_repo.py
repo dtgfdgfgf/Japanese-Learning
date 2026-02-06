@@ -101,19 +101,20 @@ class ItemRepository(BaseRepository[Item]):
             return updated or existing, False
 
         try:
-            item = await self.create_item(
-                user_id=user_id,
-                doc_id=doc_id,
-                item_type=item_type,
-                key=key,
-                payload=payload,
-                source_quote=source_quote,
-                confidence=confidence,
-            )
+            # 使用 savepoint 隔離 create 操作，避免 IntegrityError 回滾整個 transaction
+            async with self.session.begin_nested():
+                item = await self.create_item(
+                    user_id=user_id,
+                    doc_id=doc_id,
+                    item_type=item_type,
+                    key=key,
+                    payload=payload,
+                    source_quote=source_quote,
+                    confidence=confidence,
+                )
             return item, True
         except IntegrityError:
-            # 並發插入衝突：回滾後重新查詢並更新
-            await self.session.rollback()
+            # 並發插入衝突：savepoint 已自動回滾，重新查詢並更新
             existing = await self.get_by_unique_key(user_id, item_type, key)
             if existing:
                 updated = await self.update(

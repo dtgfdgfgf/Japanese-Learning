@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -69,6 +70,7 @@ class RawMessage(Base):
         Boolean,
         nullable=False,
         default=False,
+        server_default=sa.false(),
         comment="Soft delete flag",
     )
 

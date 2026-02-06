@@ -27,6 +27,7 @@ class CommandType(str, Enum):
     STATS = "stats"  # 統計
     MODE_SWITCH = "mode_switch"  # 模式切換
     SET_LANG = "set_lang"  # 語言切換
+    EXIT_PRACTICE = "exit_practice"  # 結束練習
     UNKNOWN = "unknown"  # 未知指令
 
 
@@ -64,6 +65,6 @@ class CommandResult(BaseModel):
         return cls(success=True, message=message, data=data)
 
     @classmethod
-    def error(cls, message: str, error: str | None = None) -> "CommandResult":
+    def fail(cls, message: str, error: str | None = None) -> "CommandResult":
         """Create error result."""
         return cls(success=False, message=message, error=error)

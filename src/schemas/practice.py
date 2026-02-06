@@ -7,13 +7,9 @@ DoD: PracticeQuestion, PracticeSession schemas 定義完整；支援 vocab_recal
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-
-if TYPE_CHECKING:
-    # 避免循環引用
-    pass
 
 
 # 目標語言名稱映射
@@ -89,7 +85,7 @@ class PracticeSession(BaseModel):
         default=0,
         description="Index of current question (0-based)"
     )
-    answers: list[dict] = Field(
+    answers: list[dict[str, Any]] = Field(
         default_factory=list,
         description="User's answers with results"
     )

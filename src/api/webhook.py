@@ -11,7 +11,10 @@ T049: Wire up "練習" command to PracticeService
 import asyncio
 import logging
 import os
-from typing import TYPE_CHECKING
+import time
+import unicodedata
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -60,9 +63,198 @@ DISPLAY_LIMIT = 5
 # 日誌截斷長度
 LOG_TRUNCATE_LENGTH = 50
 
+# 不會中斷 pending_save 的安全指令（這些指令執行後 pending 仍保留）
+PENDING_SAFE_COMMANDS = {
+    CommandType.HELP,
+    CommandType.MODE_SWITCH,
+    CommandType.SET_LANG,
+    CommandType.COST,
+    CommandType.STATS,
+    CommandType.PRIVACY,
+    CommandType.EXIT_PRACTICE,
+}
+
+
 # LINE 訊息長度上限（預留 footer 空間）
 LINE_MESSAGE_MAX_LENGTH = 5000
 FOOTER_RESERVE = 300
+
+# Edge Case 26: 超長文本直接入庫閾值（超過此長度跳過 Router）
+LONG_TEXT_THRESHOLD = 2000
+
+
+# ============================================================================
+# 輸入文字處理工具
+# ============================================================================
+
+# Edge Case 12: 移除隱形 Unicode 字元（ZWS、ZWNJ、BOM、Soft Hyphen、Word Joiner）
+_INVISIBLE_CHAR_TABLE = str.maketrans("", "", "\u200b\u200c\ufeff\u00ad\u2060")
+
+
+def _sanitize_text(text: str) -> str:
+    """移除隱形 Unicode 字元，並將全形英數字轉為半形。"""
+    # Edge Case 21: NFKC 正規化（全形→半形：ａ→a, １→1, ﾎﾟ→ポ）
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_INVISIBLE_CHAR_TABLE)
+    # Edge Case 25: 剝除首尾成對引號/括號
+    text = _strip_outer_quotes(text)
+    return text
+
+
+# Edge Case 25: 引號/括號配對表
+_QUOTE_PAIRS = [
+    ("「", "」"), ("『", "』"),
+    ("\u201c", "\u201d"),  # ""
+    ("\u2018", "\u2019"),  # ''
+    ("\"", "\""), ("'", "'"),
+    ("【", "】"), ("（", "）"), ("〈", "〉"),
+]
+
+
+def _strip_outer_quotes(text: str) -> str:
+    """移除首尾成對的引號/括號（只剝除一層）。"""
+    stripped = text.strip()
+    for open_q, close_q in _QUOTE_PAIRS:
+        if (
+            stripped.startswith(open_q)
+            and stripped.endswith(close_q)
+            and len(stripped) > len(open_q) + len(close_q)
+        ):
+            stripped = stripped[len(open_q):-len(close_q)].strip()
+            break  # 只剝除一層
+    return stripped
+
+
+def _has_meaningful_content(text: str) -> bool:
+    """檢查文字是否包含有意義的字元（字母、CJK、假名等）。
+
+    純空白、純符號、純 emoji 回傳 False。
+    """
+    return any(c.isalpha() for c in text)
+
+
+def _is_supported_char(c: str) -> bool:
+    """檢查字元是否屬於系統支援的語言範圍。
+
+    支援：ASCII 字母、CJK 漢字、平假名、全形/半形片假名。
+    """
+    return (
+        (c.isascii() and c.isalpha())
+        or "\u4e00" <= c <= "\u9fff"   # CJK 漢字
+        or "\u3040" <= c <= "\u309f"   # 平假名
+        or "\u30a0" <= c <= "\u30ff"   # 全形片假名
+        or "\uff65" <= c <= "\uff9f"   # 半形片假名（NFKC 後通常已轉全形，防禦性保留）
+    )
+
+
+def _has_supported_language_content(text: str) -> bool:
+    """檢查文字是否包含系統支援語言的字元（ASCII + CJK + 假名）。
+
+    已通過 _has_meaningful_content() 的文字若全是非支援語言（韓文、泰文等），
+    此函式回傳 False。
+    """
+    return any(_is_supported_char(c) for c in text)
+
+
+# Edge Case 13: 近似指令偵測（開頭匹配但有多餘字元，最多容忍 5 字元差距）
+_COMMAND_HINTS: dict[str, str] = {
+    "入庫": "入庫",
+    "分析": "分析",
+    "練習": "練習",
+    "查詢": "查詢 <關鍵字>",
+    "說明": "說明",
+    "幫助": "說明",
+    "統計": "統計",
+    "進度": "統計",
+    "用量": "用量",
+    "隱私": "隱私",
+    "刪除": "刪除最後一筆",
+    "清空": "清空資料",
+    "結束": "結束練習",
+    "停止": "結束練習",
+}
+
+
+def _suggest_command(text: str) -> str | None:
+    """若輸入近似某個指令（開頭匹配但有多餘字元），回傳建議指令。"""
+    stripped = text.strip()
+    for cmd_prefix, full_cmd in _COMMAND_HINTS.items():
+        prefix_len = len(cmd_prefix)
+        if (
+            prefix_len < len(stripped) <= prefix_len + 5
+            and stripped.startswith(cmd_prefix)
+        ):
+            return full_cmd
+    return None
+
+
+def _is_url(text: str) -> bool:
+    """檢查文字是否為 URL。"""
+    lower = text.strip().lower()
+    return lower.startswith(("http://", "https://"))
+
+
+# Edge Case 23: Romaji 偵測用常見日語 token
+_ROMAJI_MARKERS = frozenset({
+    # 助詞
+    "wa", "ga", "wo", "ni", "de", "to", "mo", "he", "no",
+    # 語尾
+    "desu", "masu", "mashita", "masen", "nai", "tai", "da", "datta",
+    # 常見詞
+    "watashi", "boku", "anata", "kore", "sore", "are",
+    "nani", "doko", "dare", "itsu", "hai", "iie",
+    "san", "kun", "chan", "sensei",
+})
+
+
+def _is_likely_romaji(text: str, target_lang: str) -> bool:
+    """偵測是否為日語羅馬字拼音（IME 未開啟）。"""
+    if target_lang != "ja":
+        return False
+    stripped = text.strip()
+    if not all(c.isascii() for c in stripped):
+        return False
+    tokens = stripped.lower().split()
+    if len(tokens) < 2:
+        return False
+    hits = sum(1 for t in tokens if t in _ROMAJI_MARKERS)
+    return hits >= 2
+
+
+# Edge Case 19: per-user lock，確保同一用戶的背景訊息依序處理
+# 使用 OrderedDict 實作 LRU，限制最大數量避免記憶體洩漏
+_MAX_USER_LOCKS = 1000
+_user_locks: dict[str, asyncio.Lock] = {}
+
+# 背景 task 集合：防止 asyncio.create_task 結果被 GC 回收
+_background_tasks: set[asyncio.Task[None]] = set()
+
+# Edge Case 28: Webhook 去重（in-memory TTL set）
+_processed_events: dict[str, float] = {}  # {webhook_event_id: timestamp}
+_EVENT_DEDUP_TTL = 60  # 60 秒內的重複事件視為 retry
+_MAX_DEDUP_EVENTS = 10000  # dedup dict 最大條目數
+
+
+def _is_duplicate_event(event_id: str | None) -> bool:
+    """檢查 webhook event 是否為重複（LINE retry）。"""
+    if not event_id:
+        return False
+    now = time.monotonic()
+    # 清理過期條目（懶惰清理，每次檢查時順便清）
+    expired = [k for k, v in _processed_events.items() if now - v > _EVENT_DEDUP_TTL]
+    for k in expired:
+        del _processed_events[k]
+    # 超過上限時清除最舊的一半
+    if len(_processed_events) >= _MAX_DEDUP_EVENTS:
+        oldest = sorted(_processed_events, key=_processed_events.get)[:_MAX_DEDUP_EVENTS // 2]  # type: ignore[arg-type]
+        for k in oldest:
+            del _processed_events[k]
+    if event_id in _processed_events:
+        logger.info(f"Duplicate webhook event detected: {event_id[:16]}...")
+        return True
+    _processed_events[event_id] = now
+    return False
+
 
 # ============================================================================
 # Main Webhook Handler
@@ -97,42 +289,70 @@ async def handle_webhook(
     for event in events:
         if isinstance(event, MessageEvent):
             if background:
-                asyncio.create_task(_safe_handle_message(event))
+                task = asyncio.create_task(_with_user_lock(event, handle_message_event))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
             else:
                 await handle_message_event(event)
         elif isinstance(event, PostbackEvent):
             if background:
-                asyncio.create_task(_safe_handle_postback(event))
+                task = asyncio.create_task(_with_user_lock(event, handle_postback_event))
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
             else:
                 await handle_postback_event(event)
 
     return {"status": "ok"}
 
 
-async def _safe_handle_message(event: MessageEvent) -> None:
-    """背景安全處理 message event，確保例外不會遺失。"""
-    try:
-        await handle_message_event(event)
-    except Exception as e:
-        logger.exception(f"Background message handler failed: {e}")
+async def _with_user_lock(event: MessageEvent | PostbackEvent, handler: Callable[..., Any]) -> None:
+    """以 per-user lock 執行 handler，確保同一用戶的事件依序處理（Edge Case 19）。
 
-
-async def _safe_handle_postback(event: PostbackEvent) -> None:
-    """背景安全處理 postback event，確保例外不會遺失。"""
+    背景安全處理，確保例外不會遺失。
+    """
     try:
-        await handle_postback_event(event)
+        user_id = event.source.user_id if event.source else None
+        if user_id:
+            if user_id not in _user_locks:
+                # 超過上限時清除最舊的一半條目
+                if len(_user_locks) >= _MAX_USER_LOCKS:
+                    keys_to_remove = list(_user_locks.keys())[: _MAX_USER_LOCKS // 2]
+                    for k in keys_to_remove:
+                        # 只清除未被佔用的 lock
+                        if not _user_locks[k].locked():
+                            del _user_locks[k]
+                _user_locks[user_id] = asyncio.Lock()
+            lock = _user_locks[user_id]
+            async with lock:
+                await handler(event)
+        else:
+            await handler(event)
     except Exception as e:
-        logger.exception(f"Background postback handler failed: {e}")
+        logger.exception(f"Background event handler failed: {e}")
 
 
 async def handle_message_event(event: MessageEvent) -> None:
     """Handle a single message event."""
     line_client = get_line_client()
 
+    # Edge Case 27: 非文字訊息回覆提示（貼圖、圖片、語音等）
     if not isinstance(event.message, TextMessageContent):
+        reply_token = event.reply_token
+        if reply_token:
+            try:
+                await line_client.reply_message(
+                    reply_token, Messages.format("INPUT_NON_TEXT")
+                )
+            except Exception:
+                logger.warning("Failed to reply to non-text message")
         return
 
-    text = event.message.text
+    # Edge Case 28: Webhook 去重（LINE retry 機制可能重送同一 event）
+    event_id = getattr(event, "webhook_event_id", None)
+    if _is_duplicate_event(event_id):
+        return
+
+    text = _sanitize_text(event.message.text)
     user_id = event.source.user_id if event.source else None
     reply_token = event.reply_token
 
@@ -159,6 +379,8 @@ async def handle_message_event(event: MessageEvent) -> None:
         parsed = parse_command(text)
         has_session = False
         has_pending_save = False
+        mode_saved = True   # 模式切換 DB 是否成功
+        lang_saved = True   # 語言切換 DB 是否成功
         try:
             async with get_session() as session:
                 # 讀取 profile（失敗不影響後續操作）
@@ -190,6 +412,7 @@ async def handle_message_event(event: MessageEvent) -> None:
                             current_mode = profile.mode
                         except Exception as e:
                             logger.warning(f"Failed to set mode: {e}")
+                            mode_saved = False
 
                 # 語言切換需在 reply 前完成
                 if parsed.command_type == CommandType.SET_LANG:
@@ -201,6 +424,7 @@ async def handle_message_event(event: MessageEvent) -> None:
                             target_lang = profile.target_lang
                         except Exception as e:
                             logger.warning(f"Failed to set target_lang: {e}")
+                            lang_saved = False
                     else:
                         logger.warning(f"Could not resolve lang_key from: {parsed.keyword}")
         except Exception as e:
@@ -211,34 +435,55 @@ async def handle_message_event(event: MessageEvent) -> None:
         if parsed.command_type == CommandType.CONFIRM_SAVE and has_pending_save:
             # 用戶輸入「1」確認入庫
             response = await _handle_confirm_save(hashed_uid, user_id)
-        elif has_pending_save and parsed.command_type != CommandType.CONFIRM_SAVE:
-            # 有 pending_save 但輸入非「1」→ 清除狀態，處理新輸入
-            async with get_session() as session:
-                user_state_repo = UserStateRepository(session)
-                await user_state_repo.clear_pending_save(hashed_uid)
-            # 繼續處理當前輸入
-            response = await _dispatch_command(
-                command=parsed,
-                line_user_id=user_id,
-                raw_text=text,
-                mode=current_mode,
-                target_lang=target_lang,
-            )
+        elif has_pending_save and parsed.command_type == CommandType.SAVE:
+            # 用戶輸入「入庫」→ 視同確認，直接儲存 pending 內容
+            response = await _handle_confirm_save(hashed_uid, user_id)
+        elif has_pending_save and parsed.command_type not in PENDING_SAFE_COMMANDS:
+            # Edge Case 24: 單一數字 0-9 但非「1」→ 提示，不清除 pending
+            stripped_input = text.strip()
+            if len(stripped_input) == 1 and stripped_input in "023456789":
+                response = Messages.format("PENDING_WRONG_NUMBER")
+            else:
+                # 非安全指令（新的 UNKNOWN 輸入等）→ 取得舊 pending + 清除 + 處理新輸入
+                discarded_word = None
+                async with get_session() as session:
+                    user_state_repo = UserStateRepository(session)
+                    discarded_word = await user_state_repo.get_pending_save(hashed_uid)
+                    await user_state_repo.clear_pending_save(hashed_uid)
+                response = await _dispatch_command(
+                    command=parsed,
+                    line_user_id=user_id,
+                    raw_text=text,
+                    mode=current_mode,
+                    target_lang=target_lang,
+                )
+                # 在回覆前加上取消通知
+                if discarded_word:
+                    notice = Messages.format("PENDING_DISCARDED", word=discarded_word)
+                    response = f"{notice}\n\n{response}"
         elif parsed.command_type == CommandType.CONFIRM_SAVE and not has_pending_save:
-            # 輸入「1」但無 pending_save → 視為普通輸入交給 Router
-            response = await _handle_unknown(user_id, text, current_mode, target_lang)
+            # 輸入「1」但無 pending_save → 明確告知可能已過期
+            response = Messages.PENDING_EXPIRED
+        elif parsed.command_type == CommandType.EXIT_PRACTICE:
+            response = await _handle_exit_practice(hashed_uid)
         elif parsed.command_type == CommandType.UNKNOWN and has_session:
             response = await _handle_practice_answer(hashed_uid, text, current_mode, target_lang)
         elif parsed.command_type == CommandType.MODE_SWITCH:
             mode_key = _resolve_mode_key(parsed)
             if mode_key:
-                response = format_mode_switch_confirm(mode_key)
+                if mode_saved:
+                    response = format_mode_switch_confirm(mode_key)
+                else:
+                    response = Messages.ERROR_GENERIC
             else:
                 response = Messages.FALLBACK_UNKNOWN
         elif parsed.command_type == CommandType.SET_LANG:
             lang_key = _resolve_lang_key(parsed)
             if lang_key:
-                response = format_lang_switch_confirm(lang_key)
+                if lang_saved:
+                    response = format_lang_switch_confirm(lang_key)
+                else:
+                    response = Messages.ERROR_GENERIC
             else:
                 response = Messages.format("LANG_SWITCH_INVALID")
         else:
@@ -252,7 +497,11 @@ async def handle_message_event(event: MessageEvent) -> None:
 
         # === Post-dispatch session：累加 token + 儲存 last_message ===
         total_tokens = usage_ctx.total_tokens
-        need_save_last_msg = parsed.command_type == CommandType.UNKNOWN and not has_session
+        need_save_last_msg = (
+            parsed.command_type == CommandType.UNKNOWN
+            and not has_session
+            and _has_meaningful_content(text)
+        )
         if total_tokens > 0 or need_save_last_msg:
             try:
                 async with get_session() as session:
@@ -448,7 +697,7 @@ async def _handle_save(line_user_id: str) -> str:
         user_state_repo = UserStateRepository(session)
         previous_content = await user_state_repo.get_last_message(hashed_uid)
 
-        if not previous_content:
+        if not previous_content or not _has_meaningful_content(previous_content):
             return Messages.SAVE_NO_CONTENT
 
         service = CommandService(session)
@@ -588,7 +837,7 @@ async def _handle_stats(line_user_id: str) -> str:
         stats_service = StatsService(session)
 
         try:
-            result = await stats_service.get_stats_summary(hash_user_id(line_user_id))
+            result = await stats_service.get_stats_summary(line_user_id)
             return result.message
         except Exception as e:
             logger.error(f"Stats query failed: {e}")
@@ -611,6 +860,21 @@ async def _handle_practice_answer(hashed_user_id: str, answer_text: str, mode: s
         except Exception as e:
             logger.error(f"Practice answer submission failed: {e}")
             return Messages.ERROR_PRACTICE_ANSWER
+
+
+async def _handle_exit_practice(hashed_user_id: str) -> str:
+    """處理結束練習指令。"""
+    async with get_session() as session:
+        from src.services.session_service import SessionService
+
+        session_service = SessionService(session)
+        has_session = await session_service.has_active_session(hashed_user_id)
+
+        if not has_session:
+            return Messages.format("PRACTICE_EXIT_NO_SESSION")
+
+        await session_service.clear_session(hashed_user_id)
+        return Messages.format("PRACTICE_EXIT")
 
 
 async def _handle_delete_last(line_user_id: str) -> str:
@@ -672,6 +936,36 @@ async def _handle_unknown(
     target_lang: str = "ja",
 ) -> str:
     """使用 Router LLM 處理未知指令。"""
+    # Edge Case 13: 近似指令偵測（如「入庫了」→ 建議「入庫」）
+    suggestion = _suggest_command(raw_text)
+    if suggestion:
+        return Messages.format("COMMAND_SUGGESTION", command=suggestion)
+
+    # Edge Case 11/14: 無意義內容（純 emoji、純符號、純空白）
+    if not _has_meaningful_content(raw_text):
+        return Messages.format("INPUT_NO_MEANINGFUL_CONTENT")
+
+    # Edge Case 18: URL 偵測
+    if _is_url(raw_text):
+        return Messages.format("INPUT_URL_DETECTED")
+
+    # Edge Case 23: Romaji 偵測（IME 未開啟）
+    if _is_likely_romaji(raw_text, target_lang):
+        return Messages.format("INPUT_LIKELY_ROMAJI")
+
+    # Edge Case 20: TSV 格式偵測（試算表複製貼上）→ 直接入庫
+    if '\t' in raw_text:
+        return await _save_and_hint(line_user_id, raw_text)
+
+    # Edge Case 26: 超長文本直接入庫（跳過 Router 節省 LLM tokens）
+    if len(raw_text) > LONG_TEXT_THRESHOLD:
+        await _save_raw_content(line_user_id, raw_text)
+        return Messages.format("INPUT_LONG_TEXT_SAVED", length=len(raw_text))
+
+    # Edge Case 29: 非支援語言偵測（韓文、泰文等）
+    if not _has_supported_language_content(raw_text):
+        return Messages.format("INPUT_UNSUPPORTED_LANG")
+
     from src.schemas.router import IntentType
     from src.services.router_service import get_router_service
 
@@ -685,31 +979,46 @@ async def _handle_unknown(
             # 判斷是否為短單字（根據語言調整閾值）
             stripped_text = raw_text.strip()
             if target_lang == "ja":
-                # 日文：通常 1-10 字元，設 15 為上限
-                is_short_word = len(stripped_text) <= 15
+                # 日文：通常 1-10 字元，設 15 為上限；需為單一 token
+                is_short_word = len(stripped_text) <= 15 and len(stripped_text.split()) == 1
             else:
-                # 英文：單字通常無空格且較短
-                is_short_word = len(stripped_text) <= 30 and ' ' not in stripped_text
+                # 英文：單字通常無空白且較短（split 涵蓋空格、換行、Tab）
+                is_short_word = len(stripped_text) <= 30 and len(stripped_text.split()) == 1
 
             if is_short_word:
                 # 短單字流程：解釋意思 + 詢問入庫
+                word = raw_text.strip()
                 explanation = await router_service.get_word_explanation(
-                    raw_text.strip(), mode=mode, target_lang=target_lang
+                    word, mode=mode, target_lang=target_lang
                 )
                 # 設定 pending_save 狀態
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
-                    await user_state_repo.set_pending_save(hashed_user_id, raw_text.strip())
+                    await user_state_repo.set_pending_save(hashed_user_id, word)
                 return Messages.format("WORD_EXPLANATION", explanation=explanation)
             else:
-                # 長文本：直接入庫
-                async with get_session() as session:
-                    service = CommandService(session)
-                    result = await service.save_raw(
-                        line_user_id=line_user_id,
-                        content_text=raw_text,
+                # 偵測多個空格分隔的短單字（例如 "apple banana cherry"）
+                tokens = stripped_text.split()
+                is_multi_word = (
+                    2 <= len(tokens) <= 5
+                    and all(len(t) <= 30 for t in tokens)
+                    and all(t.isalpha() or all(c.isalpha() or c == '-' for c in t) for t in tokens)
+                )
+                if is_multi_word:
+                    # 處理第一個單字，提示其餘逐一輸入
+                    first_word = tokens[0]
+                    explanation = await router_service.get_word_explanation(
+                        first_word, mode=mode, target_lang=target_lang
                     )
-                return f"{result.message}\n\n💡 輸入「分析」來抽取單字和文法"
+                    async with get_session() as session:
+                        user_state_repo = UserStateRepository(session)
+                        await user_state_repo.set_pending_save(hashed_user_id, first_word)
+                    remaining = "、".join(f"「{t}」" for t in tokens[1:])
+                    base = Messages.format("WORD_EXPLANATION", explanation=explanation)
+                    return f"{base}\n\n💡 偵測到多個單字，目前處理「{first_word}」。{remaining} 請逐一輸入。"
+                else:
+                    # 長文本：直接入庫
+                    return await _save_and_hint(line_user_id, raw_text)
 
         if classification.intent == IntentType.CHAT:
             response = await router_service.get_chat_response(raw_text, mode=mode, target_lang=target_lang)
@@ -720,6 +1029,15 @@ async def _handle_unknown(
             mode_label = MODE_LABELS.get(mode, mode)
             lang_label = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
             return f"{Messages.HELP}\n\n⚙️ 目前模式：{mode_label}｜學習語言：{lang_label}"
+
+        if classification.intent == IntentType.PRACTICE:
+            return await _handle_practice(line_user_id, mode, target_lang)
+
+        if classification.intent == IntentType.ANALYZE:
+            return await _handle_analyze(line_user_id, mode, target_lang)
+
+        if classification.intent == IntentType.DELETE:
+            return "如需刪除資料，請使用以下指令：\n• 刪除最後一筆\n• 清空資料"
 
         if classification.intent == IntentType.SEARCH and classification.keyword:
             async with get_session() as session:
@@ -741,7 +1059,22 @@ async def _handle_unknown(
 
     except Exception as e:
         logger.error(f"Router failed: {e}")
-        return Messages.FALLBACK_UNKNOWN
+        return Messages.ERROR_GENERIC
+
+
+async def _save_raw_content(line_user_id: str, content: str) -> None:
+    """入庫原始內容（不回傳訊息）。"""
+    async with get_session() as session:
+        service = CommandService(session)
+        await service.save_raw(line_user_id=line_user_id, content_text=content)
+
+
+async def _save_and_hint(line_user_id: str, content: str) -> str:
+    """入庫原始內容並附加「分析」提示。"""
+    async with get_session() as session:
+        service = CommandService(session)
+        result = await service.save_raw(line_user_id=line_user_id, content_text=content)
+    return f"{result.message}\n\n💡 輸入「分析」來抽取單字和文法"
 
 
 # ============================================================================
@@ -781,7 +1114,3 @@ def _format_search_results(items: "Sequence[Item]") -> str:
 
     return "\n".join(lines)
 
-
-def _get_fallback_message() -> str:
-    """取得預設的 fallback 回應訊息。"""
-    return Messages.FALLBACK_UNKNOWN

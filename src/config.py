@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(default="", description="Google Gemini API Key（留空則停用 Gemini provider）")
 
     # LLM Mode
-    default_llm_mode: str = Field(
+    default_llm_mode: Literal["free", "cheap", "rigorous"] = Field(
         default="free", description="Default LLM mode: free/cheap/rigorous"
     )
     daily_cap_tokens_free: int = Field(

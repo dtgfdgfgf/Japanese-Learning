@@ -82,7 +82,9 @@ def format_router_request(
     parts = [f"用戶訊息：{truncated}"]
     
     if context:
-        parts.insert(0, f"對話背景：{context}")
+        # 截斷 context，防止 prompt injection 與 token 消耗失控
+        truncated_ctx = context[:500] if len(context) > 500 else context
+        parts.insert(0, f"對話背景：{truncated_ctx}")
     
     parts.append("\n請分析用戶意圖並以 JSON 格式回應。")
     

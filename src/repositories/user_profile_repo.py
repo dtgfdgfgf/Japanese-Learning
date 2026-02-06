@@ -94,11 +94,17 @@ class UserProfileRepository:
 
         Args:
             user_id: Hashed LINE user ID
-            mode: cheap / balanced / rigorous
+            mode: free / cheap / rigorous
 
         Returns:
             更新後的 UserProfile
+
+        Raises:
+            ValueError: 無效的模式值
         """
+        valid_modes = ("free", "cheap", "rigorous")
+        if mode not in valid_modes:
+            raise ValueError(f"Invalid mode: {mode}, must be one of {valid_modes}")
         profile = await self.get_or_create(user_id)
         profile.mode = mode
         await self.session.flush()
@@ -126,6 +132,7 @@ class UserProfileRepository:
 
         # 重新讀取最新值
         profile = await self.session.get(UserProfile, user_id)
-        if profile:
-            await self.session.refresh(profile)
-        return profile  # type: ignore[return-value]
+        if profile is None:
+            raise ValueError(f"UserProfile not found after token update: {user_id}")
+        await self.session.refresh(profile)
+        return profile

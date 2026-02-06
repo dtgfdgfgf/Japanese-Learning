@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.lib.security import hash_user_id
 from src.repositories.item_repo import ItemRepository
 from src.repositories.practice_log_repo import PracticeLogRepository
 from src.schemas.command import CommandResult
@@ -21,15 +22,16 @@ class StatsService:
         self.item_repo = ItemRepository(session)
         self.practice_log_repo = PracticeLogRepository(session)
 
-    async def get_stats_summary(self, user_id: str) -> CommandResult:
+    async def get_stats_summary(self, line_user_id: str) -> CommandResult:
         """取得使用者學習進度摘要。
 
         Args:
-            user_id: Hashed LINE user ID
+            line_user_id: 原始 LINE user ID (會被 hash)
 
         Returns:
             CommandResult 包含格式化的統計摘要
         """
+        user_id = hash_user_id(line_user_id)
         # 素材數量
         total_vocab = await self.item_repo.count_by_user(user_id, item_type="vocab")
         total_grammar = await self.item_repo.count_by_user(user_id, item_type="grammar")

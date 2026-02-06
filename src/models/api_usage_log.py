@@ -7,6 +7,7 @@
 from datetime import datetime
 from uuid import uuid4
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -95,6 +96,13 @@ class ApiUsageLog(Base):
         nullable=False,
         server_default=func.now(),
         comment="Creation timestamp",
+    )
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+        comment="Soft delete flag",
     )
 
     # 索引：加速使用者用量查詢
