@@ -29,7 +29,8 @@ COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     (r"^練習$", CommandType.PRACTICE, False),
     (r"^查詢\s+(.+)$", CommandType.SEARCH, True),
     (r"^查詢$", CommandType.SEARCH, False),  # Missing keyword case
-    (r"^刪除最後一筆$", CommandType.DELETE_LAST, False),
+    (r"^刪除\s+(.+)$", CommandType.DELETE_ITEM, True),
+    (r"^刪除$", CommandType.DELETE_ITEM, False),
     (r"^清空資料$", CommandType.DELETE_ALL, False),
     (r"^確定清空資料$", CommandType.DELETE_CONFIRM, False),
     (r"^隱私$", CommandType.PRIVACY, False),

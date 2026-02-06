@@ -129,6 +129,12 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     # ========== 刪除相關 ==========
     "DELETE_NOTHING": "沒有可刪除的資料 📭",
     "DELETE_LAST_SUCCESS": "已刪除最後一筆（共 {count} 筆資料）🗑️",
+    "DELETE_ITEM_HINT": "請輸入要刪除的關鍵字，例如：刪除 食べる",
+    "DELETE_ITEM_SUCCESS": "已刪除「{label}」🗑️",
+    "DELETE_ITEM_NOT_FOUND": "找不到「{keyword}」相關的項目 📭",
+    "DELETE_ITEM_SELECT": "找到 {count} 筆符合「{keyword}」的項目：\n{list}\n\n請輸入編號選擇要刪除的項目（輸入其他內容取消）",
+    "DELETE_ITEM_TOO_MANY": "找到 {count} 筆符合「{keyword}」的項目（僅顯示前 5 筆）：\n{list}\n\n請輸入更精確的關鍵字縮小範圍",
+    "DELETE_ITEM_INVALID_NUMBER": "請輸入有效的編號（1-{max}），或輸入其他內容取消刪除",
     "DELETE_CONFIRM_PROMPT": (
         "⚠️ 確定要清空所有資料嗎？\n\n"
         "這將刪除：\n"
@@ -166,7 +172,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 • 用量 - 查看 API 使用量與費用
 • 英文/日文 - 切換學習語言
 • 免費模式/便宜模式/嚴謹模式 - 切換 LLM 模式
-• 刪除最後一筆 - 刪除最近一筆入庫
+• 刪除 <關鍵字> - 刪除指定的單字或文法
 • 清空資料 - 刪除所有資料（需二次確認）
 • 隱私 - 查看資料保存說明
 
@@ -190,7 +196,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 • AI 不會記憶您的對話內容
 
 🗑️ 資料刪除：
-• 輸入「刪除最後一筆」刪除最近一筆
+• 輸入「刪除 <關鍵字>」刪除指定項目
 • 輸入「清空資料」刪除所有資料
 • 刪除後資料無法恢復
 
@@ -307,6 +313,7 @@ class Messages:
     
     # 刪除
     DELETE_NOTHING: str = _MESSAGES_ZH_TW["DELETE_NOTHING"]
+    DELETE_ITEM_HINT: str = _MESSAGES_ZH_TW["DELETE_ITEM_HINT"]
     DELETE_CONFIRM_PROMPT: str = _MESSAGES_ZH_TW["DELETE_CONFIRM_PROMPT"]
     DELETE_CONFIRM_NOT_PENDING: str = _MESSAGES_ZH_TW["DELETE_CONFIRM_NOT_PENDING"]
     
@@ -464,6 +471,16 @@ def format_practice_result(correct: int, total: int) -> str:
 def format_delete_last_success(count: int) -> str:
     """格式化刪除最後一筆成功訊息。"""
     return Messages.format("DELETE_LAST_SUCCESS", count=count)
+
+
+def format_delete_item_success(label: str) -> str:
+    """格式化刪除指定項目成功訊息。"""
+    return Messages.format("DELETE_ITEM_SUCCESS", label=label)
+
+
+def format_delete_item_not_found(keyword: str) -> str:
+    """格式化刪除項目找不到訊息。"""
+    return Messages.format("DELETE_ITEM_NOT_FOUND", keyword=keyword)
 
 
 def format_delete_clear_success(raws: int, docs: int, items: int) -> str:

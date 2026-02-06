@@ -1,5 +1,6 @@
 """Repository for user transient state persistence."""
 
+import json
 import logging
 from datetime import UTC, datetime
 
@@ -15,6 +16,9 @@ CONFIRMATION_TIMEOUT = 60
 
 # 待確認入庫逾時（秒）
 PENDING_SAVE_TIMEOUT = 300  # 5 分鐘
+
+# 待確認刪除逾時（秒）
+PENDING_DELETE_TIMEOUT = 300  # 5 分鐘
 
 
 class UserStateRepository:
@@ -171,3 +175,83 @@ class UserStateRepository:
         """
         content = await self.get_pending_save(user_id)
         return content is not None
+
+    # ---- pending_delete ----
+
+    async def get_pending_delete(self, user_id: str) -> list[dict[str, str]] | None:
+        """取得待確認刪除的項目列表（含過期檢查）。
+
+        Args:
+            user_id: Hashed LINE user ID
+
+        Returns:
+            待確認刪除項目列表，若不存在或已過期則回傳 None
+        """
+        stmt = select(
+            UserStateModel.pending_delete_items,
+            UserStateModel.pending_delete_at,
+        ).where(UserStateModel.user_id == user_id)
+        result = await self.session.execute(stmt)
+        row = result.one_or_none()
+
+        if not row or not row.pending_delete_items or not row.pending_delete_at:
+            return None
+
+        pending_at = row.pending_delete_at
+        # 確保 timezone-aware 比較
+        if pending_at.tzinfo is None:
+            pending_at = pending_at.replace(tzinfo=UTC)
+
+        elapsed = (datetime.now(UTC) - pending_at).total_seconds()
+        if elapsed > PENDING_DELETE_TIMEOUT:
+            await self.clear_pending_delete(user_id)
+            return None
+
+        try:
+            return json.loads(row.pending_delete_items)
+        except (json.JSONDecodeError, TypeError):
+            await self.clear_pending_delete(user_id)
+            return None
+
+    async def set_pending_delete(
+        self, user_id: str, items: list[dict[str, str]]
+    ) -> None:
+        """設定待確認刪除的項目列表，同時清除 pending_save（互斥）。
+
+        Args:
+            user_id: Hashed LINE user ID
+            items: 待確認刪除項目列表 [{item_id, label}]
+        """
+        row = await self._get_or_create(user_id)
+        row.pending_delete_items = json.dumps(items, ensure_ascii=False)
+        row.pending_delete_at = datetime.now(UTC)
+        # 互斥：清除 pending_save
+        row.pending_save_content = None
+        row.pending_save_at = None
+        await self.session.flush()
+
+    async def clear_pending_delete(self, user_id: str) -> None:
+        """清除待確認刪除狀態。
+
+        Args:
+            user_id: Hashed LINE user ID
+        """
+        stmt = select(UserStateModel).where(UserStateModel.user_id == user_id)
+        result = await self.session.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row:
+            row.pending_delete_items = None
+            row.pending_delete_at = None
+            await self.session.flush()
+
+    async def has_pending_delete(self, user_id: str) -> bool:
+        """檢查是否有未過期的待確認刪除狀態。
+
+        Args:
+            user_id: Hashed LINE user ID
+
+        Returns:
+            True 若有未過期的待確認狀態
+        """
+        items = await self.get_pending_delete(user_id)
+        return items is not None

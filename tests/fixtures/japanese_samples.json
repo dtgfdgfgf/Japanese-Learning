@@ -163,8 +163,9 @@
       "expected_keyword": null
     },
     {
-      "input": "刪除最後一筆",
-      "expected_command": "delete_last"
+      "input": "刪除 食べる",
+      "expected_command": "delete_item",
+      "expected_keyword": "食べる"
     },
     {
       "input": "清空資料",

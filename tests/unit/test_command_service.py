@@ -49,11 +49,28 @@ class TestParseCommand:
         assert result.command_type == CommandType.SEARCH
         assert result.keyword == "食べてしまった"
 
-    def test_parse_delete_last_command(self):
-        """Test parsing '刪除最後一筆' command."""
-        result = parse_command("刪除最後一筆")
-        assert result.command_type == CommandType.DELETE_LAST
+    def test_parse_delete_item_with_keyword(self):
+        """Test parsing '刪除 食べる' command."""
+        result = parse_command("刪除 食べる")
+        assert result.command_type == CommandType.DELETE_ITEM
+        assert result.keyword == "食べる"
+
+    def test_parse_delete_item_without_keyword(self):
+        """Test parsing '刪除' command without keyword."""
+        result = parse_command("刪除")
+        assert result.command_type == CommandType.DELETE_ITEM
         assert result.keyword is None
+
+    def test_parse_delete_item_with_spaces_in_keyword(self):
+        """Test parsing '刪除 te form' command with spaces in keyword."""
+        result = parse_command("刪除 te form")
+        assert result.command_type == CommandType.DELETE_ITEM
+        assert result.keyword == "te form"
+
+    def test_parse_delete_last_no_longer_matches(self):
+        """Test '刪除最後一筆' no longer matches (requires space after 刪除)."""
+        result = parse_command("刪除最後一筆")
+        assert result.command_type == CommandType.UNKNOWN
 
     def test_parse_delete_all_command(self):
         """Test parsing '清空資料' command."""
@@ -138,7 +155,7 @@ class TestParseCommand:
             "analyze": CommandType.ANALYZE,
             "practice": CommandType.PRACTICE,
             "search": CommandType.SEARCH,
-            "delete_last": CommandType.DELETE_LAST,
+            "delete_item": CommandType.DELETE_ITEM,
             "delete_all": CommandType.DELETE_ALL,
             "privacy": CommandType.PRIVACY,
             "help": CommandType.HELP,

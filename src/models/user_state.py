@@ -54,6 +54,16 @@ class UserStateModel(Base):
         nullable=True,
         comment="待確認入庫設定時間",
     )
+    pending_delete_items: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="待確認刪除的項目列表（JSON）",
+    )
+    pending_delete_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="待確認刪除設定時間",
+    )
     is_deleted: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

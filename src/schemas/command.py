@@ -18,7 +18,7 @@ class CommandType(str, Enum):
     ANALYZE = "analyze"  # 分析
     PRACTICE = "practice"  # 練習
     SEARCH = "search"  # 查詢
-    DELETE_LAST = "delete_last"  # 刪除最後一筆
+    DELETE_ITEM = "delete_item"  # 刪除指定項目
     DELETE_ALL = "delete_all"  # 清空資料
     DELETE_CONFIRM = "delete_confirm"  # 確定清空資料
     PRIVACY = "privacy"  # 隱私

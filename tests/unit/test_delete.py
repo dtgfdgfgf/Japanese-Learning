@@ -117,6 +117,118 @@ class TestUserStateConfirmation:
         assert await repo.is_delete_confirmation_pending("test_user") is False
 
 
+class TestDeleteItem:
+    """Tests for DeleteService.delete_item."""
+
+    @pytest.fixture
+    def mock_session(self):
+        """Create mock database session."""
+        session = AsyncMock()
+        session.execute = AsyncMock()
+        session.flush = AsyncMock()
+        return session
+
+    @pytest.mark.asyncio
+    async def test_delete_item_success(self, mock_session):
+        """成功刪除指定 item。"""
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.user_id = "test_user_hash"
+        mock_item.item_type = "vocab"
+        mock_item.key = "食べる"
+        mock_item.payload = {
+            "surface": "食べる",
+            "reading": "たべる",
+            "glossary_zh": ["吃"],
+        }
+
+        service = DeleteService(mock_session)
+        service.item_repo = MagicMock()
+        service.item_repo.get_by_id = AsyncMock(return_value=mock_item)
+        service.item_repo.soft_delete = AsyncMock(return_value=True)
+
+        success, message = await service.delete_item("test_user_hash", mock_item.item_id)
+
+        assert success is True
+        assert "已刪除" in message
+        assert "食べる" in message
+        service.item_repo.soft_delete.assert_awaited_once_with(mock_item.item_id)
+
+    @pytest.mark.asyncio
+    async def test_delete_item_not_found(self, mock_session):
+        """刪除不存在的 item。"""
+        service = DeleteService(mock_session)
+        service.item_repo = MagicMock()
+        service.item_repo.get_by_id = AsyncMock(return_value=None)
+
+        success, message = await service.delete_item("test_user_hash", str(uuid.uuid4()))
+
+        assert success is False
+        assert "沒有可刪除的資料" in message
+
+    @pytest.mark.asyncio
+    async def test_delete_item_wrong_owner(self, mock_session):
+        """嘗試刪除他人的 item。"""
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.user_id = "other_user_hash"
+        mock_item.item_type = "vocab"
+        mock_item.payload = {"surface": "食べる"}
+
+        service = DeleteService(mock_session)
+        service.item_repo = MagicMock()
+        service.item_repo.get_by_id = AsyncMock(return_value=mock_item)
+
+        success, message = await service.delete_item("test_user_hash", mock_item.item_id)
+
+        assert success is False
+        assert "沒有可刪除的資料" in message
+
+    def test_format_item_label_vocab(self):
+        """格式化 vocab item 標籤。"""
+        mock_item = MagicMock()
+        mock_item.item_type = "vocab"
+        mock_item.key = "食べる"
+        mock_item.payload = {
+            "surface": "食べる",
+            "reading": "たべる",
+            "glossary_zh": ["吃"],
+        }
+
+        label = DeleteService._format_item_label(mock_item)
+        assert "食べる" in label
+        assert "たべる" in label
+        assert "吃" in label
+
+    def test_format_item_label_grammar(self):
+        """格式化 grammar item 標籤。"""
+        mock_item = MagicMock()
+        mock_item.item_type = "grammar"
+        mock_item.key = "〜てしまう"
+        mock_item.payload = {
+            "pattern": "〜てしまう",
+            "meaning_zh": "完全做完；不小心做了",
+        }
+
+        label = DeleteService._format_item_label(mock_item)
+        assert "〜てしまう" in label
+        assert "完全做完" in label
+
+    def test_format_item_label_vocab_same_surface_reading(self):
+        """surface 與 reading 相同時不重複顯示。"""
+        mock_item = MagicMock()
+        mock_item.item_type = "vocab"
+        mock_item.key = "たべる"
+        mock_item.payload = {
+            "surface": "たべる",
+            "reading": "たべる",
+            "glossary_zh": ["吃"],
+        }
+
+        label = DeleteService._format_item_label(mock_item)
+        assert "【" not in label  # 不應有【reading】
+
+
 class TestSoftDeleteFlags:
     """Tests for soft delete flag behavior."""
 

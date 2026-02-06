@@ -168,7 +168,7 @@ _COMMAND_HINTS: dict[str, str] = {
     "進度": "統計",
     "用量": "用量",
     "隱私": "隱私",
-    "刪除": "刪除最後一筆",
+    "刪除": "刪除 <關鍵字>",
     "清空": "清空資料",
     "結束": "結束練習",
     "停止": "結束練習",
@@ -379,6 +379,7 @@ async def handle_message_event(event: MessageEvent) -> None:
         parsed = parse_command(text)
         has_session = False
         has_pending_save = False
+        has_pending_delete = False
         mode_saved = True   # 模式切換 DB 是否成功
         lang_saved = True   # 語言切換 DB 是否成功
         try:
@@ -394,12 +395,13 @@ async def handle_message_event(event: MessageEvent) -> None:
                 except Exception as e:
                     logger.warning(f"Failed to load user profile, using defaults: {e}")
 
-                # 檢查 pending_save 狀態
+                # 檢查 pending_delete / pending_save 狀態
                 user_state_repo = UserStateRepository(session)
+                has_pending_delete = await user_state_repo.has_pending_delete(hashed_uid)
                 has_pending_save = await user_state_repo.has_pending_save(hashed_uid)
 
                 # 練習 session 中的答案處理（需查 DB）
-                if parsed.command_type == CommandType.UNKNOWN and not has_pending_save:
+                if parsed.command_type == CommandType.UNKNOWN and not has_pending_delete and not has_pending_save:
                     has_session = await has_active_session(session, hashed_uid)
 
                 # 模式切換需在 reply 前完成
@@ -431,8 +433,33 @@ async def handle_message_event(event: MessageEvent) -> None:
             logger.warning(f"Failed to open pre-dispatch session: {e}")
 
         # === Dispatch ===
-        # 優先處理 pending_save 狀態
-        if parsed.command_type == CommandType.CONFIRM_SAVE and has_pending_save:
+        # 優先處理 pending_delete 狀態（必須在 pending_save 之前，否則 "1" 會被誤判）
+        if has_pending_delete and text.strip().isdigit():
+            # 數字輸入 → 選擇刪除項目
+            response = await _handle_delete_select(hashed_uid, int(text.strip()))
+        elif has_pending_delete and parsed.command_type in PENDING_SAFE_COMMANDS:
+            # 安全指令不影響 pending_delete
+            response = await _dispatch_command(
+                command=parsed,
+                line_user_id=user_id,
+                raw_text=text,
+                mode=current_mode,
+                target_lang=target_lang,
+            )
+        elif has_pending_delete:
+            # 非數字、非安全指令 → 清除 pending_delete + 正常分派
+            async with get_session() as session:
+                user_state_repo = UserStateRepository(session)
+                await user_state_repo.clear_pending_delete(hashed_uid)
+            response = await _dispatch_command(
+                command=parsed,
+                line_user_id=user_id,
+                raw_text=text,
+                mode=current_mode,
+                target_lang=target_lang,
+            )
+        # 處理 pending_save 狀態
+        elif parsed.command_type == CommandType.CONFIRM_SAVE and has_pending_save:
             # 用戶輸入「1」確認入庫
             response = await _handle_confirm_save(hashed_uid, user_id)
         elif has_pending_save and parsed.command_type == CommandType.SAVE:
@@ -671,8 +698,8 @@ async def _dispatch_command(
     if command_type == CommandType.PRACTICE:
         return await _handle_practice(line_user_id, mode, target_lang)
 
-    if command_type == CommandType.DELETE_LAST:
-        return await _handle_delete_last(line_user_id)
+    if command_type == CommandType.DELETE_ITEM:
+        return await _handle_delete_item(line_user_id, command.keyword)
 
     if command_type == CommandType.DELETE_ALL:
         return await _handle_delete_all_request(line_user_id)
@@ -877,21 +904,106 @@ async def _handle_exit_practice(hashed_user_id: str) -> str:
         return Messages.format("PRACTICE_EXIT")
 
 
-async def _handle_delete_last(line_user_id: str) -> str:
-    """處理刪除最後一筆指令。"""
+async def _handle_delete_item(line_user_id: str, keyword: str | None) -> str:
+    """處理「刪除 <關鍵字>」指令。"""
+    if not keyword:
+        return Messages.DELETE_ITEM_HINT
+
     hashed_user_id = hash_user_id(line_user_id)
 
     async with get_session() as session:
+        from src.repositories.item_repo import ItemRepository
         from src.services.delete_service import DeleteService
 
-        delete_service = DeleteService(session)
+        item_repo = ItemRepository(session)
 
         try:
-            _, message = await delete_service.delete_last(hashed_user_id)
-            return message
+            items = await item_repo.search_by_keyword(
+                user_id=hashed_user_id,
+                keyword=keyword,
+                limit=MAX_SEARCH_RESULTS,
+            )
+
+            if not items:
+                return Messages.format("DELETE_ITEM_NOT_FOUND", keyword=keyword)
+
+            if len(items) == 1:
+                # 單筆直接刪除
+                delete_service = DeleteService(session)
+                _, message = await delete_service.delete_item(
+                    hashed_user_id, str(items[0].item_id)
+                )
+                return message
+
+            if len(items) <= 5:
+                # 2-5 筆：顯示列表 + 存 pending_delete
+                candidates = _build_delete_candidates(items)
+                list_text = _format_delete_candidates(candidates)
+                user_state_repo = UserStateRepository(session)
+                await user_state_repo.set_pending_delete(hashed_user_id, candidates)
+                return Messages.format(
+                    "DELETE_ITEM_SELECT",
+                    count=len(items),
+                    keyword=keyword,
+                    list=list_text,
+                )
+
+            # >5 筆：顯示前 5 筆 + 請更精確
+            candidates = _build_delete_candidates(items[:5])
+            list_text = _format_delete_candidates(candidates)
+            return Messages.format(
+                "DELETE_ITEM_TOO_MANY",
+                count=len(items),
+                keyword=keyword,
+                list=list_text,
+            )
+
         except Exception as e:
-            logger.error(f"Delete last failed: {e}")
+            logger.error(f"Delete item failed: {e}")
             return Messages.ERROR_DELETE
+
+
+async def _handle_delete_select(hashed_uid: str, number: int) -> str:
+    """處理 pending_delete 狀態下的編號選擇。"""
+    async with get_session() as session:
+        from src.services.delete_service import DeleteService
+
+        user_state_repo = UserStateRepository(session)
+        candidates = await user_state_repo.get_pending_delete(hashed_uid)
+
+        if not candidates:
+            return Messages.PENDING_EXPIRED
+
+        if number < 1 or number > len(candidates):
+            return Messages.format("DELETE_ITEM_INVALID_NUMBER", max=len(candidates))
+
+        selected = candidates[number - 1]
+        delete_service = DeleteService(session)
+        success, message = await delete_service.delete_item(
+            hashed_uid, selected["item_id"]
+        )
+
+        await user_state_repo.clear_pending_delete(hashed_uid)
+        return message
+
+
+def _build_delete_candidates(items: "Sequence[Item]") -> list[dict[str, str]]:
+    """將 Item 列表轉為 pending_delete 候選項格式。"""
+    from src.services.delete_service import DeleteService
+
+    candidates: list[dict[str, str]] = []
+    for item in items:
+        label = DeleteService._format_item_label(item)
+        candidates.append({"item_id": str(item.item_id), "label": label})
+    return candidates
+
+
+def _format_delete_candidates(candidates: list[dict[str, str]]) -> str:
+    """格式化刪除候選項為編號列表。"""
+    lines: list[str] = []
+    for i, c in enumerate(candidates, 1):
+        lines.append(f"{i}. {c['label']}")
+    return "\n".join(lines)
 
 
 async def _handle_delete_all_request(line_user_id: str) -> str:
@@ -1037,7 +1149,7 @@ async def _handle_unknown(
             return await _handle_analyze(line_user_id, mode, target_lang)
 
         if classification.intent == IntentType.DELETE:
-            return "如需刪除資料，請使用以下指令：\n• 刪除最後一筆\n• 清空資料"
+            return "如需刪除資料，請使用以下指令：\n• 刪除 <關鍵字>（例如：刪除 食べる）\n• 清空資料"
 
         if classification.intent == IntentType.SEARCH and classification.keyword:
             async with get_session() as session:

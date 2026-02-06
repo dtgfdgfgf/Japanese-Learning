@@ -75,8 +75,10 @@ def _setup_common_mocks(
 
     # User state repo
     mock_user_state_repo = MagicMock()
+    mock_user_state_repo.has_pending_delete = AsyncMock(return_value=False)
     mock_user_state_repo.has_pending_save = AsyncMock(return_value=has_pending_save)
     mock_user_state_repo.clear_pending_save = AsyncMock()
+    mock_user_state_repo.clear_pending_delete = AsyncMock()
     mock_user_state_repo.set_last_message = AsyncMock()
     mock_user_state_repo.get_pending_save = AsyncMock(
         return_value="apple" if has_pending_save else None

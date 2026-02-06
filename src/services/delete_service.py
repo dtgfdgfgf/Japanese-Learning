@@ -19,6 +19,7 @@ from src.repositories.raw_message_repo import RawMessageRepository
 from src.templates.messages import (
     Messages,
     format_delete_clear_success,
+    format_delete_item_success,
     format_delete_last_success,
 )
 
@@ -74,6 +75,46 @@ class DeleteService:
         logger.info(f"User {user_id[:8]} deleted last entry: {deleted_count} records")
 
         return deleted_count, format_delete_last_success(deleted_count)
+
+    async def delete_item(self, user_id: str, item_id: str) -> tuple[bool, str]:
+        """刪除指定的 item（軟刪除，驗證所有權）。
+
+        Args:
+            user_id: Hashed user ID
+            item_id: 要刪除的 item ID
+
+        Returns:
+            Tuple of (success, message)
+        """
+        item = await self.item_repo.get_by_id(item_id)
+
+        if not item or item.user_id != user_id:
+            return False, Messages.DELETE_NOTHING
+
+        # 軟刪除
+        await self.item_repo.soft_delete(item_id)
+
+        # 格式化 label
+        label = self._format_item_label(item)
+        return True, format_delete_item_success(label)
+
+    @staticmethod
+    def _format_item_label(item: Item) -> str:
+        """格式化 item 的顯示標籤。"""
+        payload = item.payload or {}
+        if item.item_type == "vocab":
+            surface = payload.get("surface", "")
+            reading = payload.get("reading", "")
+            glossary = payload.get("glossary_zh", [])
+            meaning = glossary[0] if glossary else ""
+            if reading and reading != surface:
+                return f"{surface}【{reading}】- {meaning}"
+            return f"{surface} - {meaning}"
+        elif item.item_type == "grammar":
+            pattern = payload.get("pattern", "")
+            meaning = payload.get("meaning_zh", "")
+            return f"{pattern} - {meaning}"
+        return item.key
 
     async def _get_latest_raw(self, user_id: str) -> RawMessage | None:
         """Get the most recent raw message for user."""
