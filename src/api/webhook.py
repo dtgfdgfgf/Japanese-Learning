@@ -33,7 +33,12 @@ from src.models.item import Item
 from src.repositories.user_profile_repo import UserProfileRepository
 from src.repositories.user_state_repo import UserStateRepository
 from src.schemas.command import CommandType, ParsedCommand
-from src.services.command_service import LANG_NAME_MAP, MODE_NAME_MAP, CommandService, parse_command
+from src.services.command_service import (
+    LANG_NAME_MAP,
+    MODE_NAME_MAP,
+    CommandService,
+    parse_command,
+)
 from src.services.practice_service import has_active_session
 from src.templates.messages import (
     Messages,
@@ -1104,12 +1109,15 @@ async def _handle_unknown(
                 is_short_word = len(stripped_text) <= 30 and len(stripped_text.split()) == 1
 
             if is_short_word:
-                # 短單字流程：解釋意思 + 詢問入庫
+                # 短單字流程：先查 DB，已入庫則直接顯示
                 word = raw_text.strip()
+                db_items = await _search_user_items(hashed_user_id, word)
+                if db_items:
+                    return _format_search_results(db_items)
+                # DB 無紀錄：LLM 解釋 + 詢問入庫
                 explanation = await router_service.get_word_explanation(
                     word, mode=mode, target_lang=target_lang
                 )
-                # 設定 pending_save 狀態
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
                     await user_state_repo.set_pending_save(hashed_user_id, word)
@@ -1158,20 +1166,22 @@ async def _handle_unknown(
             return "如需刪除資料，請使用以下指令：\n• 刪除 <關鍵字>（例如：刪除 食べる）\n• 清空資料"
 
         if classification.intent == IntentType.SEARCH and classification.keyword:
-            async with get_session() as session:
-                from src.repositories.item_repo import ItemRepository
-
-                item_repo = ItemRepository(session)
-                items = await item_repo.search_by_keyword(
-                    user_id=hashed_user_id,
-                    keyword=classification.keyword,
-                    limit=MAX_SEARCH_RESULTS,
-                )
-
-                if not items:
-                    return format_search_no_result(classification.keyword)
-
+            items = await _search_user_items(hashed_user_id, classification.keyword)
+            if items:
                 return _format_search_results(items)
+
+            # DB 無結果 + 單字 → LLM 解釋 + 詢問入庫
+            keyword = classification.keyword
+            if _is_single_word(keyword, target_lang):
+                explanation = await router_service.get_word_explanation(
+                    keyword, mode=mode, target_lang=target_lang
+                )
+                async with get_session() as session:
+                    user_state_repo = UserStateRepository(session)
+                    await user_state_repo.set_pending_save(hashed_user_id, keyword)
+                return Messages.format("WORD_EXPLANATION", explanation=explanation)
+
+            return format_search_no_result(keyword)
 
         return Messages.FALLBACK_UNKNOWN
 
@@ -1198,6 +1208,25 @@ async def _save_and_hint(line_user_id: str, content: str) -> str:
 # ============================================================================
 # Helper Functions
 # ============================================================================
+
+
+def _is_single_word(text: str, target_lang: str) -> bool:
+    """判斷文字是否為可用 LLM 解釋的單一短字詞。"""
+    stripped = text.strip()
+    if len(stripped.split()) != 1:
+        return False
+    return len(stripped) <= 15 if target_lang == "ja" else len(stripped) <= 30
+
+
+async def _search_user_items(hashed_user_id: str, keyword: str, limit: int = MAX_SEARCH_RESULTS) -> list[Item]:
+    """在使用者 items 中搜尋關鍵字。"""
+    from src.repositories.item_repo import ItemRepository
+
+    async with get_session() as session:
+        item_repo = ItemRepository(session)
+        return await item_repo.search_by_keyword(
+            user_id=hashed_user_id, keyword=keyword, limit=limit,
+        )
 
 
 def _format_search_results(items: "Sequence[Item]") -> str:
