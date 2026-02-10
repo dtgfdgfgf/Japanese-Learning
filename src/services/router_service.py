@@ -58,7 +58,6 @@ class RouterService:
                 system_prompt=system_prompt,
                 user_message=user_prompt,
                 temperature=0.3,
-                max_tokens=500,
             )
             response_text = response.content
             
@@ -254,7 +253,6 @@ class RouterService:
                 system_prompt=system_prompt,
                 user_message=message,
                 temperature=0.7,
-                max_tokens=500,
             )
             
             return response.content
@@ -304,7 +302,6 @@ class RouterService:
                 system_prompt=system_prompt,
                 user_message=word,
                 temperature=0.3,
-                max_tokens=300,
             )
 
             return response.content

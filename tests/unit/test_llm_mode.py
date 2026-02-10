@@ -128,7 +128,7 @@ class TestCallProviderDispatch:
 
         result = await client._call_provider(
             provider="anthropic", model="claude-sonnet-4-5-20250929",
-            system_prompt="s", user_message="u", max_tokens=100, temperature=0.5,
+            system_prompt="s", user_message="u", temperature=0.5,
         )
         assert result["content"] == "anthropic"
 
@@ -143,7 +143,7 @@ class TestCallProviderDispatch:
 
         result = await client._call_provider(
             provider="openai", model="gpt-4o-mini",
-            system_prompt="s", user_message="u", max_tokens=100, temperature=0.5,
+            system_prompt="s", user_message="u", temperature=0.5,
         )
         assert result["content"] == "openai"
 
@@ -158,7 +158,7 @@ class TestCallProviderDispatch:
 
         result = await client._call_provider(
             provider="google", model="gemini-3-pro-preview",
-            system_prompt="s", user_message="u", max_tokens=100, temperature=0.5,
+            system_prompt="s", user_message="u", temperature=0.5,
         )
         assert result["content"] == "google"
 
@@ -171,5 +171,5 @@ class TestCallProviderDispatch:
         with pytest.raises(ValueError, match="Unknown provider"):
             await client._call_provider(
                 provider="azure", model="test",
-                system_prompt="s", user_message="u", max_tokens=100, temperature=0.5,
+                system_prompt="s", user_message="u", temperature=0.5,
             )

@@ -144,7 +144,6 @@ class LLMClient:
         self,
         system_prompt: str,
         user_message: str,
-        max_tokens: int = 2048,
         temperature: float = 0.7,
         json_mode: bool = False,
     ) -> LLMResponse:
@@ -153,7 +152,6 @@ class LLMClient:
         Args:
             system_prompt: System role instructions
             user_message: User input message
-            max_tokens: Maximum tokens in response
             temperature: Sampling temperature
             json_mode: If True, request JSON output
 
@@ -170,7 +168,6 @@ class LLMClient:
             response = await self._call_anthropic(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                max_tokens=max_tokens,
                 temperature=temperature,
                 json_mode=json_mode,
             )
@@ -202,7 +199,6 @@ class LLMClient:
             response = await self._call_openai(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                max_tokens=max_tokens,
                 temperature=temperature,
                 json_mode=json_mode,
             )
@@ -224,11 +220,13 @@ class LLMClient:
             logger.error(f"OpenAI fallback also failed: {e}")
             raise
 
+    # Anthropic API 必須傳 max_tokens，設為模型上限以不限制輸出
+    ANTHROPIC_MAX_TOKENS = 8192
+
     async def _call_anthropic(
         self,
         system_prompt: str,
         user_message: str,
-        max_tokens: int,
         temperature: float,
         json_mode: bool = False,
         model: str | None = None,
@@ -247,7 +245,7 @@ class LLMClient:
         async with asyncio.timeout(self.timeout):
             response = await self.anthropic_client.messages.create(
                 model=use_model,
-                max_tokens=max_tokens,
+                max_tokens=self.ANTHROPIC_MAX_TOKENS,
                 temperature=temperature,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
@@ -265,7 +263,6 @@ class LLMClient:
         self,
         system_prompt: str,
         user_message: str,
-        max_tokens: int,
         temperature: float,
         json_mode: bool = False,
     ) -> dict[str, Any]:
@@ -276,7 +273,6 @@ class LLMClient:
         """
         kwargs: dict[str, Any] = {
             "model": self.OPENAI_MODEL,
-            "max_tokens": max_tokens,
             "temperature": temperature,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -302,7 +298,6 @@ class LLMClient:
         self,
         system_prompt: str,
         user_message: str,
-        max_tokens: int,
         temperature: float,
         model: str = "gemini-3-pro-preview",
         json_mode: bool = False,
@@ -345,7 +340,6 @@ class LLMClient:
         mode: str,
         system_prompt: str,
         user_message: str,
-        max_tokens: int = 2048,
         temperature: float = 0.7,
         json_mode: bool = False,
     ) -> LLMResponse:
@@ -357,7 +351,6 @@ class LLMClient:
             mode: free / cheap / rigorous
             system_prompt: System 指令
             user_message: 使用者輸入
-            max_tokens: 最大 token 數
             temperature: 取樣溫度
             json_mode: 是否要求 JSON 輸出
 
@@ -375,7 +368,6 @@ class LLMClient:
             model=model,
             system_prompt=system_prompt,
             user_message=user_message,
-            max_tokens=max_tokens,
             temperature=temperature,
             json_mode=json_mode,
         )
@@ -398,7 +390,6 @@ class LLMClient:
         model: str,
         system_prompt: str,
         user_message: str,
-        max_tokens: int,
         temperature: float,
         json_mode: bool = False,
     ) -> dict[str, Any]:
@@ -407,7 +398,6 @@ class LLMClient:
             return await self._call_anthropic(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                max_tokens=max_tokens,
                 temperature=temperature,
                 json_mode=json_mode,
                 model=model,
@@ -416,7 +406,6 @@ class LLMClient:
             return await self._call_openai(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                max_tokens=max_tokens,
                 temperature=temperature,
                 json_mode=json_mode,
             )
@@ -424,7 +413,6 @@ class LLMClient:
             return await self._call_google(
                 system_prompt=system_prompt,
                 user_message=user_message,
-                max_tokens=max_tokens,
                 temperature=temperature,
                 model=model,
                 json_mode=json_mode,
@@ -437,7 +425,6 @@ class LLMClient:
         mode: str,
         system_prompt: str,
         user_message: str,
-        max_tokens: int = 2048,
         temperature: float = 0.3,
     ) -> tuple[dict[str, Any], LLMTrace]:
         """根據模式完成 JSON 回應，與 complete_json 相同解析邏輯。"""
@@ -445,7 +432,6 @@ class LLMClient:
             mode=mode,
             system_prompt=system_prompt,
             user_message=user_message,
-            max_tokens=max_tokens,
             temperature=temperature,
             json_mode=True,
         )
@@ -482,7 +468,6 @@ class LLMClient:
         self,
         system_prompt: str,
         user_message: str,
-        max_tokens: int = 2048,
         temperature: float = 0.3,
     ) -> tuple[dict[str, Any], LLMTrace]:
         """Complete a prompt and parse JSON response.
@@ -490,7 +475,6 @@ class LLMClient:
         Args:
             system_prompt: System prompt (should request JSON output)
             user_message: User input
-            max_tokens: Maximum tokens
             temperature: Lower temperature for more consistent JSON
 
         Returns:
@@ -502,7 +486,6 @@ class LLMClient:
         response = await self.complete(
             system_prompt=system_prompt,
             user_message=user_message,
-            max_tokens=max_tokens,
             temperature=temperature,
             json_mode=True,
         )

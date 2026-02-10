@@ -384,9 +384,9 @@ class TestWordExplanation:
 
         assert response
         assert len(response) > 0
-        # 確認 LLM 被呼叫且有設定 max_tokens
+        # 確認 LLM 被呼叫且未設定 max_tokens（不限制輸出長度）
         call_kwargs = service.llm_client.complete_with_mode.call_args.kwargs
-        assert call_kwargs.get("max_tokens") == 300
+        assert "max_tokens" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_english_word_explanation(self):
