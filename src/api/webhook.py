@@ -380,8 +380,8 @@ async def handle_message_event(event: MessageEvent) -> None:
         has_session = False
         has_pending_save = False
         has_pending_delete = False
-        mode_saved = True   # 模式切換 DB 是否成功
-        lang_saved = True   # 語言切換 DB 是否成功
+        mode_saved = parsed.command_type != CommandType.MODE_SWITCH
+        lang_saved = parsed.command_type != CommandType.SET_LANG
         try:
             async with get_session() as session:
                 # 讀取 profile（失敗不影響後續操作）
@@ -392,6 +392,10 @@ async def handle_message_event(event: MessageEvent) -> None:
                     target_lang = profile.target_lang or "ja"
                     daily_used = profile.daily_used_tokens or 0
                     daily_cap = profile.daily_cap_tokens_free or 50000
+                    logger.debug(
+                        "Profile loaded: mode=%s, target_lang=%s, user=%s",
+                        profile.mode, profile.target_lang, hashed_uid[:8],
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to load user profile, using defaults: {e}")
 
@@ -412,9 +416,10 @@ async def handle_message_event(event: MessageEvent) -> None:
                             profile_repo = UserProfileRepository(session)
                             profile = await profile_repo.set_mode(hashed_uid, mode_key)
                             current_mode = profile.mode
+                            mode_saved = True
+                            logger.info("Mode switched to %s for user %s", mode_key, hashed_uid[:8])
                         except Exception as e:
                             logger.warning(f"Failed to set mode: {e}")
-                            mode_saved = False
 
                 # 語言切換需在 reply 前完成
                 if parsed.command_type == CommandType.SET_LANG:
@@ -424,9 +429,10 @@ async def handle_message_event(event: MessageEvent) -> None:
                             profile_repo = UserProfileRepository(session)
                             profile = await profile_repo.set_target_lang(hashed_uid, lang_key)
                             target_lang = profile.target_lang
+                            lang_saved = True
+                            logger.info("Target lang switched to %s for user %s", lang_key, hashed_uid[:8])
                         except Exception as e:
                             logger.warning(f"Failed to set target_lang: {e}")
-                            lang_saved = False
                     else:
                         logger.warning(f"Could not resolve lang_key from: {parsed.keyword}")
         except Exception as e:
