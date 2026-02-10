@@ -319,7 +319,6 @@ class LLMClient:
             raise RuntimeError("Gemini API key not configured")
         def _sync_call() -> dict[str, Any]:
             gen_config_kwargs: dict[str, Any] = {
-                "max_output_tokens": max_tokens,
                 "temperature": temperature,
             }
             if json_mode:
