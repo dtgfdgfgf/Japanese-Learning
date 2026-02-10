@@ -140,86 +140,6 @@ class LLMClient:
         else:
             self._gemini_configured = False
 
-    async def complete(
-        self,
-        system_prompt: str,
-        user_message: str,
-        temperature: float = 0.7,
-        json_mode: bool = False,
-    ) -> LLMResponse:
-        """Complete a prompt using LLM with fallback.
-
-        Args:
-            system_prompt: System role instructions
-            user_message: User input message
-            temperature: Sampling temperature
-            json_mode: If True, request JSON output
-
-        Returns:
-            LLMResponse with content and metadata
-
-        Raises:
-            Exception: If both primary and fallback fail
-        """
-        start_time = time.time()
-
-        # Try Anthropic first
-        try:
-            response = await self._call_anthropic(
-                system_prompt=system_prompt,
-                user_message=user_message,
-                temperature=temperature,
-                json_mode=json_mode,
-            )
-            latency_ms = int((time.time() - start_time) * 1000)
-
-            resp = LLMResponse(
-                content=response["content"],
-                model=self.ANTHROPIC_MODEL,
-                provider="anthropic",
-                input_tokens=response["input_tokens"],
-                output_tokens=response["output_tokens"],
-                latency_ms=latency_ms,
-                is_fallback=False,
-            )
-            _accumulate_usage(resp.input_tokens, resp.output_tokens)
-            return resp
-
-        except TimeoutError:
-            logger.warning(
-                f"Anthropic timeout after {self.timeout}s, falling back to OpenAI"
-            )
-        except anthropic.APIError as e:
-            logger.warning(f"Anthropic API error: {e}, falling back to OpenAI")
-        except Exception as e:
-            logger.warning(f"Anthropic unexpected error: {e}, falling back to OpenAI")
-
-        # Fallback to OpenAI
-        try:
-            response = await self._call_openai(
-                system_prompt=system_prompt,
-                user_message=user_message,
-                temperature=temperature,
-                json_mode=json_mode,
-            )
-            latency_ms = int((time.time() - start_time) * 1000)
-
-            resp = LLMResponse(
-                content=response["content"],
-                model=self.OPENAI_MODEL,
-                provider="openai",
-                input_tokens=response["input_tokens"],
-                output_tokens=response["output_tokens"],
-                latency_ms=latency_ms,
-                is_fallback=True,
-            )
-            _accumulate_usage(resp.input_tokens, resp.output_tokens)
-            return resp
-
-        except Exception as e:
-            logger.error(f"OpenAI fallback also failed: {e}")
-            raise
-
     # Anthropic API 必須傳 max_tokens，設為模型上限以不限制輸出
     ANTHROPIC_MAX_TOKENS = 8192
 
@@ -324,10 +244,17 @@ class LLMClient:
                 generation_config=genai.GenerationConfig(**gen_config_kwargs),
             )
             response = client.generate_content(user_message)
+            # deprecated SDK 的 thinking model 可能在無可見輸出時
+            # 對 response.text 拋出 ValueError
+            try:
+                content = response.text or ""
+            except ValueError as e:
+                logger.warning(f"Gemini response.text raised ValueError: {e}")
+                raise
             # token 使用量
             usage = response.usage_metadata
             return {
-                "content": response.text or "",
+                "content": content,
                 "input_tokens": usage.prompt_token_count if usage else 0,
                 "output_tokens": usage.candidates_token_count if usage else 0,
             }
@@ -464,62 +391,6 @@ class LLMClient:
 
         return parsed, trace
 
-    async def complete_json(
-        self,
-        system_prompt: str,
-        user_message: str,
-        temperature: float = 0.3,
-    ) -> tuple[dict[str, Any], LLMTrace]:
-        """Complete a prompt and parse JSON response.
-
-        Args:
-            system_prompt: System prompt (should request JSON output)
-            user_message: User input
-            temperature: Lower temperature for more consistent JSON
-
-        Returns:
-            Tuple of (parsed JSON dict, LLMTrace for logging)
-
-        Raises:
-            json.JSONDecodeError: If response is not valid JSON
-        """
-        response = await self.complete(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            temperature=temperature,
-            json_mode=True,
-        )
-
-        # Parse JSON from response
-        content = response.content.strip()
-
-        # Handle markdown code blocks
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-
-        try:
-            parsed = json.loads(content.strip())
-        except json.JSONDecodeError:
-            logger.error(
-                "LLM JSON parse failed (provider=%s, model=%s): %s",
-                response.provider, response.model, content[:200],
-            )
-            raise
-
-        trace = LLMTrace(
-            model=response.model,
-            provider=response.provider,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            latency_ms=response.latency_ms,
-            is_fallback=response.is_fallback,
-        )
-
-        return parsed, trace
 
 
 # Global client instance
