@@ -53,12 +53,13 @@ class TestPrivacyCommandIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.reply_with_quick_reply = AsyncMock()
             # 返回真正的 MessageEvent 物件，讓 isinstance 檢查通過
             mock_client.parse_events.return_value = [
                 create_message_event(text="隱私", user_id=user_id, reply_token="token1")
             ]
             mock_line.return_value = mock_client
-            
+
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as client:
                 response = await client.post(
@@ -70,9 +71,9 @@ class TestPrivacyCommandIntegration:
                     }
                 )
                 assert response.status_code == 200
-                
-                # Verify reply_message was called
-                mock_client.reply_message.assert_called_once()
+
+                # Verify reply was sent (webhook 使用 reply_with_quick_reply)
+                mock_client.reply_with_quick_reply.assert_called_once()
 
 
 class TestPrivacyContent:

@@ -13,6 +13,7 @@ import logging
 import random
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -266,8 +267,8 @@ class PracticeService:
     def _generate_vocab_question(
         self,
         question_id: str,
-        item,
-        payload: dict,
+        item: Item,
+        payload: dict[str, Any],
     ) -> PracticeQuestion | None:
         """
         Generate vocabulary recall question.
@@ -305,8 +306,8 @@ class PracticeService:
     def _generate_grammar_question(
         self,
         question_id: str,
-        item,
-        payload: dict,
+        item: Item,
+        payload: dict[str, Any],
     ) -> PracticeQuestion | None:
         """
         Generate grammar cloze question.
@@ -341,8 +342,8 @@ class PracticeService:
     def _generate_vocab_meaning_question(
         self,
         question_id: str,
-        item,
-        payload: dict,
+        item: Item,
+        payload: dict[str, Any],
     ) -> PracticeQuestion | None:
         """生成目標語→中文詞義題。
 
@@ -379,8 +380,8 @@ class PracticeService:
     def _generate_grammar_usage_question(
         self,
         question_id: str,
-        item,
-        payload: dict,
+        item: Item,
+        payload: dict[str, Any],
     ) -> PracticeQuestion | None:
         """生成文法造句題。
 

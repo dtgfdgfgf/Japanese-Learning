@@ -366,6 +366,7 @@ class ItemRepository(BaseRepository[Item]):
         result = await self.session.execute(stmt)
         await self.session.flush()
         return result.rowcount
+
     async def get_recent_by_user(
         self,
         user_id: str,

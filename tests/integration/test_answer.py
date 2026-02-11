@@ -16,7 +16,7 @@ from httpx import AsyncClient, ASGITransport
 
 from src.main import app
 from src.schemas.practice import PracticeSession, PracticeQuestion, PracticeType
-from tests.conftest import create_message_event
+from tests.conftest import create_message_event, create_mock_db_session
 
 
 class TestAnswerFlowIntegration:
@@ -55,36 +55,41 @@ class TestAnswerFlowIntegration:
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.reply_with_quick_reply = AsyncMock()
             mock_client.parse_events.return_value = [
                 create_message_event(text="考える", user_id=user_id, reply_token="token1")
             ]
 
-            # Mock active session
-            with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
-                mock_has_session.return_value = True
-                
-                with patch("src.api.webhook._handle_practice_answer") as mock_handle:
-                    mock_handle.return_value = "✅ 正確！\n\n下一題：\n2. 「吃」的日文是？"
-                    
-                    transport = ASGITransport(app=app)
-                    async with AsyncClient(transport=transport, base_url="http://test") as client:
-                        response = await client.post(
-                            "/webhook",
-                            content=body,
-                            headers={
-                                "X-Line-Signature": signature,
-                                "Content-Type": "application/json"
-                            }
-                        )
-                        assert response.status_code == 200
-                        mock_handle.assert_called()
+            mock_db = create_mock_db_session()
+            with patch("src.api.webhook.get_session") as mock_session:
+                mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+                mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+                with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
+                    mock_has_session.return_value = True
+
+                    with patch("src.api.webhook._handle_practice_answer") as mock_handle:
+                        mock_handle.return_value = "✅ 正確！\n\n下一題：\n2. 「吃」的日文是？"
+
+                        transport = ASGITransport(app=app)
+                        async with AsyncClient(transport=transport, base_url="http://test") as client:
+                            response = await client.post(
+                                "/webhook",
+                                content=body,
+                                headers={
+                                    "X-Line-Signature": signature,
+                                    "Content-Type": "application/json"
+                                }
+                            )
+                            assert response.status_code == 200
+                            mock_handle.assert_called()
 
     @pytest.mark.asyncio
     async def test_incorrect_answer_submission(self):
         """Test submitting an incorrect answer."""
         user_id = "Utest_incorrect_answer"
         channel_secret = "test_secret_for_testing_only"
-        
+
         body = json.dumps({
             "destination": "Uxxxxx",
             "events": [{
@@ -96,7 +101,7 @@ class TestAnswerFlowIntegration:
                 "mode": "active"
             }]
         }).encode("utf-8")
-        
+
         signature = self._create_signature(body, channel_secret)
 
         with patch("src.api.webhook.get_line_client") as mock_get_client:
@@ -104,28 +109,34 @@ class TestAnswerFlowIntegration:
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.reply_with_quick_reply = AsyncMock()
             mock_client.parse_events.return_value = [
                 create_message_event(text="wrong_answer", user_id=user_id, reply_token="token1")
             ]
 
-            with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
-                mock_has_session.return_value = True
-                
-                with patch("src.api.webhook._handle_practice_answer") as mock_handle:
-                    mock_handle.return_value = "❌ 答案是：考える\n\n下一題：\n2. 「吃」的日文是？"
-                    
-                    transport = ASGITransport(app=app)
-                    async with AsyncClient(transport=transport, base_url="http://test") as client:
-                        response = await client.post(
-                            "/webhook",
-                            content=body,
-                            headers={
-                                "X-Line-Signature": signature,
-                                "Content-Type": "application/json"
-                            }
-                        )
-                        assert response.status_code == 200
-                        mock_handle.assert_called()
+            mock_db = create_mock_db_session()
+            with patch("src.api.webhook.get_session") as mock_session:
+                mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+                mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+                with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
+                    mock_has_session.return_value = True
+
+                    with patch("src.api.webhook._handle_practice_answer") as mock_handle:
+                        mock_handle.return_value = "❌ 答案是：考える\n\n下一題：\n2. 「吃」的日文是？"
+
+                        transport = ASGITransport(app=app)
+                        async with AsyncClient(transport=transport, base_url="http://test") as client:
+                            response = await client.post(
+                                "/webhook",
+                                content=body,
+                                headers={
+                                    "X-Line-Signature": signature,
+                                    "Content-Type": "application/json"
+                                }
+                            )
+                            assert response.status_code == 200
+                            mock_handle.assert_called()
 
     @pytest.mark.asyncio
     async def test_session_completion(self):

@@ -7,6 +7,7 @@ DoD: pytest discover 成功
 
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock
@@ -103,29 +104,31 @@ async def async_db_session() -> AsyncGenerator[AsyncSession, None]:
     await engine.dispose()
 
 
-@pytest.fixture
-def mock_line_client() -> MagicMock:
-    """Create a mock LINE client."""
+def _build_mock_line_client() -> MagicMock:
+    """建立包含所有常用方法的 mock LINE client。"""
     client = MagicMock()
     client.verify_signature = MagicMock(return_value=True)
     client.reply_message = AsyncMock()
+    client.reply_with_quick_reply = AsyncMock()
+    client.push_message = AsyncMock()
+    client.push_message_with_quick_reply = AsyncMock()
     client.parse_events = MagicMock(return_value=[])
     return client
 
 
 @pytest.fixture
+def mock_line_client() -> MagicMock:
+    """Create a mock LINE client."""
+    return _build_mock_line_client()
+
+
+@pytest.fixture
 def mock_line_client_factory():
     """Factory fixture that returns a mock LINE client.
-    
+
     Use with patch('src.lib.line_client.get_line_client', return_value=mock)
     """
-    def _create_mock():
-        client = MagicMock()
-        client.verify_signature = MagicMock(return_value=True)
-        client.reply_message = AsyncMock()
-        client.parse_events = MagicMock(return_value=[])
-        return client
-    return _create_mock
+    return _build_mock_line_client
 
 
 @pytest.fixture
@@ -181,6 +184,23 @@ def sample_user_id() -> str:
     return "hashed_user_id_for_testing"
 
 
+def create_mock_db_session() -> MagicMock:
+    """建立用於 integration test 的 mock DB session。
+
+    回傳的 mock 支援 execute（回傳空結果）、flush、add 等常用操作。
+    適用於需要模擬 pre-dispatch DB 互動的 webhook 測試。
+    """
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None
+    mock_result.one_or_none.return_value = None
+    mock_result.scalar.return_value = 0
+    mock_db = MagicMock()
+    mock_db.execute = AsyncMock(return_value=mock_result)
+    mock_db.flush = AsyncMock()
+    mock_db.add = MagicMock()
+    return mock_db
+
+
 def create_message_event(
     text: str,
     user_id: str = "Utest_user",
@@ -215,6 +235,6 @@ def create_message_event(
         reply_token=reply_token,
         timestamp=timestamp,
         mode="active",
-        webhookEventId="test_webhook_event_id",  # LINE SDK 必要欄位
+        webhookEventId=f"test_webhook_event_{uuid.uuid4().hex[:12]}",  # 每次產生唯一 ID，避免 dedup 誤判
         deliveryContext=DeliveryContext(isRedelivery=False),  # LINE SDK 必要欄位
     )

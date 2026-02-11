@@ -498,18 +498,20 @@ MODE_LABELS: dict[str, str] = {
     "rigorous": "嚴謹",
 }
 
-# 每模式的 input/output 每百萬 token 單價（USD）
-MODE_PRICING: dict[str, tuple[float, float]] = {
-    "free": (2.0, 12.0),        # gemini-3-pro-preview: $2/$12 per MTok
-    "cheap": (3.0, 15.0),       # claude-sonnet-4-5: $3/$15 per MTok
-    "rigorous": (5.0, 25.0),    # claude-opus-4-6: $5/$25 per MTok
-}
-
 
 def calculate_cost(mode: str, in_tokens: int, out_tokens: int) -> float:
-    """計算本次請求的費用（USD）。"""
-    input_price, output_price = MODE_PRICING.get(mode, (0.0, 0.0))
-    return (in_tokens * input_price + out_tokens * output_price) / 1_000_000
+    """計算本次請求的費用（USD）。
+
+    透過 MODE_MODEL_MAP 查找 provider/model，再委派給統一定價表計算。
+    未知模式回傳 0（不收費）。
+    """
+    from src.lib.llm_client import MODE_MODEL_MAP
+    from src.repositories.api_usage_log_repo import calculate_cost as _calc_cost
+
+    mapping = MODE_MODEL_MAP.get(mode)
+    if mapping is None:
+        return 0.0
+    return _calc_cost(mapping["provider"], mapping["model"], in_tokens, out_tokens)
 
 
 def _format_tokens(n: int) -> str:

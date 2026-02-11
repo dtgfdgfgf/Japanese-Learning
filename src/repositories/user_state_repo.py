@@ -27,12 +27,27 @@ class UserStateRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def _get_active(self, user_id: str) -> UserStateModel | None:
+        """取得使用者的 active（未 soft delete）state 記錄。"""
+        stmt = select(UserStateModel).where(
+            UserStateModel.user_id == user_id,
+            UserStateModel.is_deleted.is_(False),
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def _get_or_create(self, user_id: str) -> UserStateModel:
-        """取得或建立 user state 記錄。"""
+        """取得或建立 user state 記錄。
+
+        若記錄曾被 soft delete，則恢復（設 is_deleted=False）。
+        """
         stmt = select(UserStateModel).where(UserStateModel.user_id == user_id)
         result = await self.session.execute(stmt)
         row = result.scalar_one_or_none()
         if row:
+            if row.is_deleted:
+                row.is_deleted = False
+                await self.session.flush()
             return row
         row = UserStateModel(user_id=user_id)
         self.session.add(row)
@@ -44,7 +59,8 @@ class UserStateRepository:
     async def get_last_message(self, user_id: str) -> str | None:
         """讀取使用者最後一則非指令訊息。"""
         stmt = select(UserStateModel.last_message).where(
-            UserStateModel.user_id == user_id
+            UserStateModel.user_id == user_id,
+            UserStateModel.is_deleted.is_(False),
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -58,9 +74,7 @@ class UserStateRepository:
 
     async def clear_last_message(self, user_id: str) -> None:
         """清除使用者最後一則非指令訊息。"""
-        stmt = select(UserStateModel).where(UserStateModel.user_id == user_id)
-        result = await self.session.execute(stmt)
-        row = result.scalar_one_or_none()
+        row = await self._get_active(user_id)
         if row:
             row.last_message = None
             row.last_message_at = None
@@ -71,7 +85,8 @@ class UserStateRepository:
     async def get_delete_confirm_at(self, user_id: str) -> datetime | None:
         """取得清空確認請求時間。"""
         stmt = select(UserStateModel.delete_confirm_at).where(
-            UserStateModel.user_id == user_id
+            UserStateModel.user_id == user_id,
+            UserStateModel.is_deleted.is_(False),
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -84,9 +99,7 @@ class UserStateRepository:
 
     async def clear_delete_confirm(self, user_id: str) -> None:
         """清除清空確認狀態。"""
-        stmt = select(UserStateModel).where(UserStateModel.user_id == user_id)
-        result = await self.session.execute(stmt)
-        row = result.scalar_one_or_none()
+        row = await self._get_active(user_id)
         if row:
             row.delete_confirm_at = None
             await self.session.flush()
@@ -119,7 +132,10 @@ class UserStateRepository:
         stmt = select(
             UserStateModel.pending_save_content,
             UserStateModel.pending_save_at,
-        ).where(UserStateModel.user_id == user_id)
+        ).where(
+            UserStateModel.user_id == user_id,
+            UserStateModel.is_deleted.is_(False),
+        )
         result = await self.session.execute(stmt)
         row = result.one_or_none()
 
@@ -156,9 +172,7 @@ class UserStateRepository:
         Args:
             user_id: Hashed LINE user ID
         """
-        stmt = select(UserStateModel).where(UserStateModel.user_id == user_id)
-        result = await self.session.execute(stmt)
-        row = result.scalar_one_or_none()
+        row = await self._get_active(user_id)
         if row:
             row.pending_save_content = None
             row.pending_save_at = None
@@ -190,7 +204,10 @@ class UserStateRepository:
         stmt = select(
             UserStateModel.pending_delete_items,
             UserStateModel.pending_delete_at,
-        ).where(UserStateModel.user_id == user_id)
+        ).where(
+            UserStateModel.user_id == user_id,
+            UserStateModel.is_deleted.is_(False),
+        )
         result = await self.session.execute(stmt)
         row = result.one_or_none()
 
@@ -236,9 +253,7 @@ class UserStateRepository:
         Args:
             user_id: Hashed LINE user ID
         """
-        stmt = select(UserStateModel).where(UserStateModel.user_id == user_id)
-        result = await self.session.execute(stmt)
-        row = result.scalar_one_or_none()
+        row = await self._get_active(user_id)
         if row:
             row.pending_delete_items = None
             row.pending_delete_at = None

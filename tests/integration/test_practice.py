@@ -15,7 +15,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from src.main import app
-from tests.conftest import create_message_event
+from tests.conftest import create_message_event, create_mock_db_session
 
 
 class TestPracticeFlowIntegration:
@@ -112,6 +112,7 @@ class TestPracticeFlowIntegration:
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.reply_with_quick_reply = AsyncMock()
             mock_client.parse_events.return_value = [
                 create_message_event(text="練習", user_id=user_id, reply_token="token1")
             ]
@@ -121,10 +122,10 @@ class TestPracticeFlowIntegration:
                 mock_session_instance = MagicMock()
                 mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_session_instance)
                 mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
-                
+
                 # Create mock practice session
                 from src.schemas.practice import PracticeSession, PracticeQuestion, PracticeType
-                
+
                 mock_questions = [
                     PracticeQuestion(
                         question_id=str(uuid.uuid4()),
@@ -136,13 +137,13 @@ class TestPracticeFlowIntegration:
                     )
                     for i in range(5)
                 ]
-                
+
                 mock_practice_session = PracticeSession(
                     session_id=str(uuid.uuid4()),
                     user_id="hashed_user_id",
                     questions=mock_questions,
                 )
-                
+
                 with patch("src.services.practice_service.PracticeService") as mock_practice_cls:
                     mock_practice = MagicMock()
                     mock_practice.create_session = AsyncMock(return_value=(
@@ -162,9 +163,9 @@ class TestPracticeFlowIntegration:
                             }
                         )
                         assert response.status_code == 200
-                        
-                        # Verify reply was sent with questions
-                        mock_client.reply_message.assert_called()
+
+                        # Verify reply was sent (webhook 使用 reply_with_quick_reply)
+                        mock_client.reply_with_quick_reply.assert_called()
 
     @pytest.mark.asyncio
     async def test_answer_submission_flow(self):
@@ -194,30 +195,36 @@ class TestPracticeFlowIntegration:
             mock_get_client.return_value = mock_client
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.reply_with_quick_reply = AsyncMock()
             mock_client.parse_events.return_value = [
                 create_message_event(text="考える", user_id=user_id, reply_token="token1")
             ]
 
-            # Mock has_active_session to return True
-            with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
-                mock_has_session.return_value = True
-                
-                # Mock _handle_practice_answer（重構後的私有函數）
-                with patch("src.api.webhook._handle_practice_answer") as mock_handle:
-                    mock_handle.return_value = "✅ 正確！"
-                    
-                    transport = ASGITransport(app=app)
-                    async with AsyncClient(transport=transport, base_url="http://test") as client:
-                        response = await client.post(
-                            "/webhook",
-                            content=body,
-                            headers={
-                                "X-Line-Signature": signature,
-                                "Content-Type": "application/json"
-                            }
-                        )
-                        assert response.status_code == 200
-                        
-                        # Verify answer handler was called
-                        mock_handle.assert_called()
+            mock_db = create_mock_db_session()
+            with patch("src.api.webhook.get_session") as mock_session:
+                mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+                mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+                # Mock has_active_session to return True
+                with patch("src.api.webhook.has_active_session", new_callable=AsyncMock) as mock_has_session:
+                    mock_has_session.return_value = True
+
+                    # Mock _handle_practice_answer（重構後的私有函數）
+                    with patch("src.api.webhook._handle_practice_answer") as mock_handle:
+                        mock_handle.return_value = "✅ 正確！"
+
+                        transport = ASGITransport(app=app)
+                        async with AsyncClient(transport=transport, base_url="http://test") as client:
+                            response = await client.post(
+                                "/webhook",
+                                content=body,
+                                headers={
+                                    "X-Line-Signature": signature,
+                                    "Content-Type": "application/json"
+                                }
+                            )
+                            assert response.status_code == 200
+
+                            # Verify answer handler was called
+                            mock_handle.assert_called()
 

@@ -251,7 +251,7 @@ def _is_duplicate_event(event_id: str | None) -> bool:
         del _processed_events[k]
     # 超過上限時清除最舊的一半
     if len(_processed_events) >= _MAX_DEDUP_EVENTS:
-        oldest = sorted(_processed_events, key=_processed_events.get)[:_MAX_DEDUP_EVENTS // 2]  # type: ignore[arg-type]
+        oldest = sorted(_processed_events, key=lambda eid: _processed_events[eid])[:_MAX_DEDUP_EVENTS // 2]
         for k in oldest:
             del _processed_events[k]
     if event_id in _processed_events:

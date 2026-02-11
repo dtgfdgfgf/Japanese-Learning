@@ -8,15 +8,13 @@ DoD: 測試二次確認流程；驗證清空後 items 不出現在查詢/練習
 import json
 import hashlib
 import hmac
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch, MagicMock
-import uuid
 
 import pytest
 from httpx import AsyncClient, ASGITransport
 
 from src.main import app
-from tests.conftest import create_message_event
+from tests.conftest import create_message_event, create_mock_db_session
 
 
 class TestDeleteLastIntegration:
@@ -115,25 +113,31 @@ class TestClearAllIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.reply_with_quick_reply = AsyncMock()
             mock_client.parse_events.return_value = [
                 create_message_event(text="清空資料", user_id=user_id, reply_token="token1")
             ]
             mock_line.return_value = mock_client
-            
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                response = await client.post(
-                    "/webhook",
-                    content=body,
-                    headers={
-                        "X-Line-Signature": signature,
-                        "Content-Type": "application/json"
-                    }
-                )
-                assert response.status_code == 200
-                
-                # Verify reply_message was called
-                mock_client.reply_message.assert_called_once()
+
+            mock_db = create_mock_db_session()
+            with patch("src.api.webhook.get_session") as mock_session:
+                mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_db)
+                mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    response = await client.post(
+                        "/webhook",
+                        content=body,
+                        headers={
+                            "X-Line-Signature": signature,
+                            "Content-Type": "application/json"
+                        }
+                    )
+                    assert response.status_code == 200
+
+                    # Verify reply was sent (webhook 使用 reply_with_quick_reply)
+                    mock_client.reply_with_quick_reply.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_confirm_clear_without_pending_request(self):

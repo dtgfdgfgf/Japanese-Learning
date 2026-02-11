@@ -11,7 +11,6 @@ import hmac
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 from src.main import app
@@ -113,6 +112,7 @@ class TestAnalyzeFlowIntegration:
             mock_client = MagicMock()
             mock_client.verify_signature.return_value = True
             mock_client.reply_message = AsyncMock()
+            mock_client.reply_with_quick_reply = AsyncMock()
             mock_client.parse_events.return_value = [
                 create_message_event(text="分析", user_id=user_id, reply_token="token1")
             ]
@@ -123,11 +123,11 @@ class TestAnalyzeFlowIntegration:
                 mock_session_instance = MagicMock()
                 mock_session.return_value.__aenter__ = AsyncMock(return_value=mock_session_instance)
                 mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
-                
+
                 # Mock deferred document
                 mock_doc = MagicMock()
                 mock_doc.doc_id = "doc123"
-                
+
                 # Mock extraction response
                 from src.schemas.extractor import ExtractorResponse
                 mock_response = ExtractorResponse(
@@ -136,7 +136,7 @@ class TestAnalyzeFlowIntegration:
                     vocab_count=3,
                     grammar_count=2,
                 )
-                
+
                 with patch("src.services.extractor_service.ExtractorService") as mock_extractor_cls:
                     mock_extractor = MagicMock()
                     mock_extractor.get_deferred_documents = AsyncMock(return_value=[mock_doc])
@@ -154,9 +154,9 @@ class TestAnalyzeFlowIntegration:
                             }
                         )
                         assert response.status_code == 200
-                        
-                        # Verify reply was sent with extraction results
-                        mock_client.reply_message.assert_called()
+
+                        # Verify reply was sent (webhook 使用 reply_with_quick_reply)
+                        mock_client.reply_with_quick_reply.assert_called()
 
     @pytest.mark.asyncio
     async def test_full_save_then_analyze_flow(self, async_db_session):
