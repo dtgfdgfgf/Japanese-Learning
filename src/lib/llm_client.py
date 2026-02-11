@@ -13,8 +13,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
-import google.generativeai as genai
 import openai
+from google import genai
+from google.genai import types
 
 from src.config import settings
 
@@ -135,9 +136,10 @@ class LLMClient:
 
         # Gemini client 初始化（key 為空時跳過）
         if settings.gemini_api_key:
-            genai.configure(api_key=settings.gemini_api_key)
+            self._gemini_client = genai.Client(api_key=settings.gemini_api_key)
             self._gemini_configured = True
         else:
+            self._gemini_client = None
             self._gemini_configured = False
 
     # Anthropic API 必須傳 max_tokens，設為模型上限以不限制輸出
@@ -222,7 +224,7 @@ class LLMClient:
         model: str = "gemini-3-pro-preview",
         json_mode: bool = False,
     ) -> dict[str, Any]:
-        """Call Google Gemini API (同步包裝為 async)。
+        """Call Google Gemini API（原生 async）。
 
         Args:
             json_mode: 為 True 時設定 response_mime_type="application/json"。
@@ -230,37 +232,29 @@ class LLMClient:
         Returns:
             Dict with content, input_tokens, output_tokens
         """
-        if not self._gemini_configured:
+        if not self._gemini_configured or self._gemini_client is None:
             raise RuntimeError("Gemini API key not configured")
-        def _sync_call() -> dict[str, Any]:
-            gen_config_kwargs: dict[str, Any] = {
-                "temperature": temperature,
-            }
-            if json_mode:
-                gen_config_kwargs["response_mime_type"] = "application/json"
-            client = genai.GenerativeModel(
-                model_name=model,
-                system_instruction=system_prompt,
-                generation_config=genai.GenerationConfig(**gen_config_kwargs),
-            )
-            response = client.generate_content(user_message)
-            # deprecated SDK 的 thinking model 可能在無可見輸出時
-            # 對 response.text 拋出 ValueError
-            try:
-                content = response.text or ""
-            except ValueError as e:
-                logger.warning(f"Gemini response.text raised ValueError: {e}")
-                raise
-            # token 使用量
-            usage = response.usage_metadata
-            return {
-                "content": content,
-                "input_tokens": usage.prompt_token_count if usage else 0,
-                "output_tokens": usage.candidates_token_count if usage else 0,
-            }
 
-        async with asyncio.timeout(self.timeout):
-            return await asyncio.to_thread(_sync_call)
+        config_kwargs: dict[str, Any] = {
+            "system_instruction": system_prompt,
+            "temperature": temperature,
+        }
+        if json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
+
+        response = await self._gemini_client.aio.models.generate_content(
+            model=model,
+            contents=user_message,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+
+        content = response.text or ""
+        usage = response.usage_metadata
+        return {
+            "content": content,
+            "input_tokens": usage.prompt_token_count if usage else 0,
+            "output_tokens": usage.candidates_token_count if usage else 0,
+        }
 
     async def complete_with_mode(
         self,
