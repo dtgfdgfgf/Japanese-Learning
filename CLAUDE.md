@@ -57,9 +57,11 @@ Infrastructure (src/repositories/, lib/) → BaseRepository[T] CRUD, LLMClient, 
 
 **指令流程**: 使用者訊息 → `webhook.py` → `CommandService.parse_command()` regex 匹配 → 未匹配則 `RouterService` LLM 意圖分類 → 分派至對應 service
 
-**LLM mode-based 選擇**: 依據模式選擇 provider — free→Google Gemini, cheap→Claude Sonnet, rigorous→Claude Opus。實作在 `src/lib/llm_client.py`。
+**Dispatch 狀態守衛**: pre-dispatch 階段依序檢查 `pending_delete` → `pending_save` → `has_session`，符合條件則優先處理對應邏輯，不進入一般指令分派。`PENDING_SAFE_COMMANDS`（HELP、MODE_SWITCH、SET_LANG、COST、STATS、PRIVACY）在 pending 狀態下仍可正常執行。
 
-**練習 session**: 目前 in-memory dict（`src/services/session_service.py`），非持久化。
+**LLM mode-based 選擇**: 依據模式選擇 provider — free→Gemini 3 Pro, cheap→Claude Sonnet 4.5, rigorous→Claude Opus 4.6。實作在 `src/lib/llm_client.py` 的 `MODE_MODEL_MAP`。
+
+**練習 session**: DB-backed（`PracticeSessionModel` + `SessionService`），JSONB 存放題目狀態，30 分鐘 TTL 自動過期。
 
 **資料流**: `raw_messages` → `documents`（1:1）→ `items`（1:N vocab/grammar，JSONB payload）→ `practice_logs`
 
@@ -87,7 +89,7 @@ Infrastructure (src/repositories/, lib/) → BaseRepository[T] CRUD, LLMClient, 
 
 ## Environment Variables
 
-必要：`LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `DATABASE_URL`, `ANTHROPIC_API_KEY`, `USER_ID_SALT`（min 32 chars）
+必要：`LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `DATABASE_URL`, `ANTHROPIC_API_KEY`, `USER_ID_SALT`（min 32 chars）, `GEMINI_API_KEY`（free mode 需要）
 
 選用：`APP_ENV`（development/production）, `LOG_LEVEL`, `LLM_RATE_LIMIT_PER_MINUTE`（預設 10）
 
