@@ -35,8 +35,8 @@
 | Database | PostgreSQL | 15+ | Via Supabase, JSONB for flexible payload |
 | ORM | SQLAlchemy | 2.0+ | Async mode with `asyncpg` driver |
 | Migration | Alembic | ≥1.13.0 | Autogenerate from models |
-| LLM Primary | Anthropic Claude | claude-sonnet-4-20250514 | Structured JSON output |
-| LLM Fallback | OpenAI | gpt-4o-mini | On timeout/error/low confidence |
+| LLM Primary | Anthropic Claude | Sonnet / Opus | Mode-based selection, structured JSON output |
+| LLM Free | Google Gemini | gemini-3-pro-preview | Free mode provider |
 | LINE SDK | line-bot-sdk | ≥3.5.0 | Official Python SDK |
 | Testing | pytest | ≥8.0.0 | pytest-asyncio for async tests |
 | Linting | ruff | ≥0.2.0 | Fast Python linter |
@@ -88,7 +88,7 @@ japanese-learning/
 │   │   └── extractor.py     # 內容抽取 prompt
 │   │
 │   ├── lib/                 # Utilities
-│   │   ├── llm_client.py    # Anthropic + OpenAI fallback
+│   │   ├── llm_client.py    # Anthropic + Gemini (mode-based)
 │   │   ├── line_client.py   # LINE SDK wrapper
 │   │   ├── normalizer.py    # Japanese text normalization
 │   │   └── security.py      # User ID hashing
@@ -154,7 +154,7 @@ japanese-learning/
 1. **Command-first routing**: 硬規則指令（入庫、分析、練習）優先，fallback 到 LLM Router
 2. **Soft delete**: 所有刪除操作設置 `is_deleted=True`，不物理刪除
 3. **Deferred parsing**: 長文先存 raw，分析時再處理
-4. **LLM fallback**: Anthropic 主要，OpenAI 在 timeout/error/低信心度時接手
+4. **LLM mode-based**: 依據模式選擇 provider — free→Gemini, cheap→Sonnet, rigorous→Opus
 5. **User ID hashing**: 不直接儲存 LINE user ID，使用 SHA-256 + salt
 
 ---
@@ -535,7 +535,7 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000
 | `LINE_CHANNEL_SECRET` | Yes | LINE Channel Secret |
 | `DATABASE_URL` | Yes | PostgreSQL asyncpg connection string |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API Key |
-| `OPENAI_API_KEY` | Yes | OpenAI API Key (fallback) |
+| `GEMINI_API_KEY` | No | Google Gemini API Key (free mode) |
 | `USER_ID_SALT` | Yes | Salt for hashing user IDs (min 32 chars) |
 | `APP_ENV` | No | `development` / `staging` / `production` |
 | `LOG_LEVEL` | No | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
@@ -547,7 +547,7 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000
 ### Performance
 
 - **P95 response time**: < 3 seconds for practice commands
-- **LLM timeout**: 15 seconds (then fallback to OpenAI)
+- **LLM timeout**: 15 seconds
 - **LINE reply timeout**: 30 seconds max
 - **Max items per user**: 1000 items without degradation
 
@@ -603,7 +603,7 @@ items = await session.execute(query)  # session 未關閉！
 | 1 | **未正確使用 async session** | Connection pool exhaustion | 使用 `async with get_session()` context manager |
 | 2 | **查詢時忘記 soft delete 條件** | 回傳已刪除資料 | 所有查詢加上 `WHERE is_deleted = FALSE` |
 | 3 | **缺少 type hints** | 型別錯誤難以追蹤 | 所有 function 必須有完整 type annotations |
-| 4 | **直接呼叫 LLM 無 timeout** | 請求卡住導致 LINE timeout | 使用 `LLMClient` 內建 timeout + fallback |
+| 4 | **直接呼叫 LLM 無 timeout** | 請求卡住導致 LINE timeout | 使用 `LLMClient` 內建 timeout |
 | 5 | **儲存原始 LINE user ID** | 隱私風險 | 一律使用 `hash_user_id()` |
 | 6 | **缺少 webhook signature 驗證** | 安全漏洞 | 使用 `LineClient.verify_signature()` |
 | 7 | **LLM token 使用無上限** | 成本失控 | 請求時設定 `max_tokens` |
@@ -641,7 +641,7 @@ items = await session.execute(query)  # session 未關閉！
 ### 4. Error Handling (Important)
 
 - [ ] Business exceptions 適當定義與 raise
-- [ ] LLM 呼叫有 timeout 與 fallback
+- [ ] LLM 呼叫有 timeout
 - [ ] 回傳使用者友善的錯誤訊息
 - [ ] Exception 有適當 logging（含 context）
 

@@ -16,19 +16,13 @@ from src.repositories.base import BaseRepository
 
 
 # LLM 定價表 (USD per 1M tokens)
-# 參考：https://openai.com/pricing, https://anthropic.com/pricing
+# 參考：https://anthropic.com/pricing, https://ai.google.dev/pricing
 PRICING: dict[str, dict[str, dict[str, float]]] = {
     "anthropic": {
         "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
         "claude-opus-4-6": {"input": 5.0, "output": 25.0},
         # 預設定價 (未知模型使用)
         "default": {"input": 3.0, "output": 15.0},
-    },
-    "openai": {
-        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-        "gpt-4o": {"input": 2.50, "output": 10.0},
-        # 預設定價 (未知模型使用)
-        "default": {"input": 0.15, "output": 0.60},
     },
     "google": {
         "gemini-3-pro-preview": {"input": 2.0, "output": 12.0},
@@ -47,7 +41,7 @@ def calculate_cost(
     """計算 API 呼叫費用。
 
     Args:
-        provider: LLM 提供者 (anthropic/openai)
+        provider: LLM 提供者 (anthropic/google)
         model: 模型名稱
         input_tokens: 輸入 token 數量
         output_tokens: 輸出 token 數量
@@ -55,7 +49,7 @@ def calculate_cost(
     Returns:
         費用 (美元)
     """
-    provider_pricing = PRICING.get(provider, PRICING["openai"])
+    provider_pricing = PRICING.get(provider, PRICING["anthropic"])
     model_pricing = provider_pricing.get(model, provider_pricing["default"])
 
     input_cost = (input_tokens / 1_000_000) * model_pricing["input"]
@@ -119,7 +113,6 @@ class ApiUsageLogRepository(BaseRepository[ApiUsageLog]):
             output_tokens=trace.output_tokens,
             cost_usd=cost_usd,
             latency_ms=trace.latency_ms,
-            is_fallback=trace.is_fallback,
         )
 
     async def get_summary_by_user(

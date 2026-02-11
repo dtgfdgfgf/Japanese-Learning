@@ -36,8 +36,6 @@ class Settings(BaseSettings):
 
     # LLM API Keys
     anthropic_api_key: str = Field(..., description="Anthropic API Key")
-    openai_api_key: str = Field(..., description="OpenAI API Key (fallback)")
-
     # Application
     app_env: Literal["development", "staging", "production"] = Field(
         default="development", description="Application environment"
@@ -71,13 +69,7 @@ class Settings(BaseSettings):
 
     # LLM Settings
     llm_timeout_seconds: int = Field(
-        default=15, ge=5, le=60, description="LLM API timeout before fallback"
-    )
-    llm_fallback_confidence_threshold: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Confidence threshold to trigger fallback",
+        default=15, ge=5, le=60, description="LLM API timeout in seconds"
     )
 
     @field_validator("database_url")

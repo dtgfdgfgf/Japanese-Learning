@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 os.environ["LINE_CHANNEL_SECRET"] = "test_secret_for_testing_only"
 os.environ["LINE_CHANNEL_ACCESS_TOKEN"] = "test_access_token"
 os.environ["ANTHROPIC_API_KEY"] = "test_anthropic_key"
-os.environ["OPENAI_API_KEY"] = "sk-test_openai_key_for_testing"
 os.environ["USER_ID_SALT"] = "test_salt_for_user_id_hashing_must_be_at_least_32_chars_long"
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@localhost:5432/test_db"
 os.environ["GEMINI_API_KEY"] = "test_gemini_key"
@@ -138,8 +137,8 @@ def mock_llm_client() -> MagicMock:
     client.complete = AsyncMock(return_value="test response")
     client.complete_json = AsyncMock(return_value=({"items": []}, mock_trace))
     client.complete_with_mode = AsyncMock(return_value=MagicMock(
-        content="test response", model="test", provider="openai",
-        input_tokens=10, output_tokens=20, latency_ms=100, is_fallback=False,
+        content="test response", model="test", provider="anthropic",
+        input_tokens=10, output_tokens=20, latency_ms=100,
     ))
     client.complete_json_with_mode = AsyncMock(return_value=({"items": []}, mock_trace))
     return client

@@ -67,7 +67,6 @@ class TestCompleteWithMode:
         )
 
         assert result.provider == "google"
-        assert result.is_fallback is False
         assert result.content == "test response"
         client._call_provider.assert_awaited_once()
 
@@ -131,21 +130,6 @@ class TestCallProviderDispatch:
             system_prompt="s", user_message="u", temperature=0.5,
         )
         assert result["content"] == "anthropic"
-
-    @pytest.mark.asyncio
-    @patch.object(LLMClient, "__init__", lambda self, **kw: None)
-    async def test_dispatch_openai(self):
-        """provider='openai' 應呼叫 _call_openai。"""
-        client = LLMClient.__new__(LLMClient)
-        client._call_openai = AsyncMock(return_value={
-            "content": "openai", "input_tokens": 1, "output_tokens": 1,
-        })
-
-        result = await client._call_provider(
-            provider="openai", model="gpt-4o-mini",
-            system_prompt="s", user_message="u", temperature=0.5,
-        )
-        assert result["content"] == "openai"
 
     @pytest.mark.asyncio
     @patch.object(LLMClient, "__init__", lambda self, **kw: None)

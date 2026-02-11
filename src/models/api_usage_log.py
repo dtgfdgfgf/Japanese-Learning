@@ -23,14 +23,13 @@ class ApiUsageLog(Base):
     Attributes:
         log_id: 唯一識別碼 (UUID)
         user_id: Hashed LINE user ID
-        provider: LLM 提供者 (anthropic/openai)
+        provider: LLM 提供者 (anthropic/google)
         model: 模型名稱 (e.g., claude-sonnet-4-5-20250929)
         operation: 操作類型 (extraction/practice/router)
         input_tokens: 輸入 token 數量
         output_tokens: 輸出 token 數量
         cost_usd: 計算後的費用 (美元)
         latency_ms: API 回應延遲 (毫秒)
-        is_fallback: 是否為 fallback 呼叫
         created_at: 建立時間
     """
 
@@ -49,7 +48,7 @@ class ApiUsageLog(Base):
     provider: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        comment="LLM provider: anthropic, openai",
+        comment="LLM provider: anthropic, google",
     )
     model: Mapped[str] = mapped_column(
         String(64),
@@ -84,12 +83,6 @@ class ApiUsageLog(Base):
         nullable=False,
         default=0,
         comment="API response latency in milliseconds",
-    )
-    is_fallback: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        comment="Whether this was a fallback call",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

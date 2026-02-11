@@ -23,7 +23,7 @@
 - PostgreSQL (Supabase)
 - LINE Messaging API Channel
 - Anthropic API Key (主要 LLM)
-- OpenAI API Key (備援 LLM)
+- Google Gemini API Key (免費模式，選用)
 
 ### 安裝步驟
 
@@ -63,7 +63,7 @@ LINE_CHANNEL_ACCESS_TOKEN=your_access_token
 
 # LLM
 ANTHROPIC_API_KEY=sk-ant-xxx
-OPENAI_API_KEY=sk-xxx
+GEMINI_API_KEY=your_gemini_key  # 選用，免費模式使用
 
 # Security
 USER_ID_SALT=random_secure_string
@@ -98,7 +98,7 @@ japanese-learning/
 │   ├── api/              # API endpoints
 │   │   └── webhook.py    # LINE webhook handler
 │   ├── lib/              # 共用函式庫
-│   │   ├── llm_client.py # LLM 客戶端（含 fallback）
+│   │   ├── llm_client.py # LLM 客戶端（mode-based）
 │   │   ├── line_client.py# LINE API 客戶端
 │   │   ├── normalizer.py # 日文正規化
 │   │   └── security.py   # 安全相關函數
@@ -124,7 +124,7 @@ japanese-learning/
 
 - **Web Framework**: FastAPI
 - **Database**: PostgreSQL (Supabase) + SQLAlchemy 2.0
-- **LLM**: Anthropic Claude (主) / OpenAI GPT-4o-mini (備援)
+- **LLM**: Anthropic Claude (主) / Google Gemini (免費模式)
 - **LINE SDK**: line-bot-sdk v3
 - **日文處理**: jaconv
 
