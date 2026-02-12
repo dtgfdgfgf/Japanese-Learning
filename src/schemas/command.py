@@ -28,6 +28,7 @@ class CommandType(str, Enum):
     MODE_SWITCH = "mode_switch"  # 模式切換
     SET_LANG = "set_lang"  # 語言切換
     EXIT_PRACTICE = "exit_practice"  # 結束練習
+    WORD_SAVE = "word_save"  # 單字 入庫（直接入庫，不解釋）
     UNKNOWN = "unknown"  # 未知指令
 
 

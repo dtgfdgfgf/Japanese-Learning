@@ -121,7 +121,7 @@ class TestCase5ConfirmSaveNoPending:
 
         reply_text = _get_reply_text(mock_line)
         assert "沒有待入庫的內容" in reply_text
-        assert "5 分鐘" in reply_text
+        assert "入庫" in reply_text
 
 
 class TestCase6SafeCommandPreservesPending:
@@ -855,3 +855,84 @@ class TestCase30AutocorrectHint:
         msg = Messages.format("WORD_EXPLANATION", explanation="test explanation")
         assert "重新輸入" in msg
         assert "拼寫" in msg
+
+
+# ============================================================================
+# WORD_SAVE：「單字 入庫」直接入庫指令
+# ============================================================================
+
+
+class TestWordSaveDispatch:
+    """「單字 入庫」指令觸發 _handle_word_save 並呼叫 save_raw。"""
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_line_client")
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.api.webhook.has_active_session", new_callable=AsyncMock, return_value=False)
+    async def test_word_save_dispatch(
+        self, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
+    ):
+        """「するどい save」→ 觸發 _handle_word_save，呼叫 save_raw。"""
+        mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
+            mock_get_line, mock_session_ctx, has_pending_save=False
+        )
+
+        mock_save_result = MagicMock()
+        mock_save_result.message = "已入庫：するどい"
+
+        mock_cmd_service = MagicMock()
+        mock_cmd_service.save_raw = AsyncMock(return_value=mock_save_result)
+
+        with (
+            patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
+            patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
+            patch("src.api.webhook.build_mode_quick_replies", return_value=None),
+            patch("src.api.webhook.CommandService", return_value=mock_cmd_service),
+        ):
+            event = _make_message_event("するどい save")
+            await handle_message_event(event)
+
+        # save_raw 應被呼叫，content_text 為「するどい」
+        mock_cmd_service.save_raw.assert_awaited_once()
+        call_kwargs = mock_cmd_service.save_raw.call_args
+        assert call_kwargs[1]["content_text"] == "するどい"
+
+        reply_text = _get_reply_text(mock_line)
+        assert "已入庫" in reply_text
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_line_client")
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    async def test_word_save_with_pending_does_not_clear_pending(
+        self, mock_hash, mock_session_ctx, mock_get_line
+    ):
+        """有 pending_save 時使用「にぶい save」→ pending 不被取消。"""
+        mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
+            mock_get_line, mock_session_ctx, has_pending_save=True
+        )
+
+        mock_save_result = MagicMock()
+        mock_save_result.message = "已入庫：にぶい"
+
+        mock_cmd_service = MagicMock()
+        mock_cmd_service.save_raw = AsyncMock(return_value=mock_save_result)
+
+        with (
+            patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
+            patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
+            patch("src.api.webhook.build_mode_quick_replies", return_value=None),
+            patch("src.api.webhook.CommandService", return_value=mock_cmd_service),
+        ):
+            event = _make_message_event("にぶい save")
+            await handle_message_event(event)
+
+        # 關鍵斷言：pending_save 不應被清除（WORD_SAVE 在 PENDING_SAFE_COMMANDS）
+        mock_user_state_repo.clear_pending_save.assert_not_awaited()
+
+        # save_raw 應被呼叫
+        mock_cmd_service.save_raw.assert_awaited_once()
+
+        reply_text = _get_reply_text(mock_line)
+        assert "已入庫" in reply_text

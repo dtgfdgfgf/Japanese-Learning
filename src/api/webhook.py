@@ -77,6 +77,7 @@ PENDING_SAFE_COMMANDS = {
     CommandType.STATS,
     CommandType.PRIVACY,
     CommandType.EXIT_PRACTICE,
+    CommandType.WORD_SAVE,
 }
 
 
@@ -700,6 +701,9 @@ async def _dispatch_command(
     if command_type == CommandType.SAVE:
         return await _handle_save(line_user_id)
 
+    if command_type == CommandType.WORD_SAVE:
+        return await _handle_word_save(line_user_id, command.keyword)
+
     if command_type == CommandType.SEARCH:
         return await _handle_search(line_user_id, command.keyword)
 
@@ -746,6 +750,20 @@ async def _handle_save(line_user_id: str) -> str:
 
         await user_state_repo.clear_last_message(hashed_uid)
 
+    return result.message
+
+
+async def _handle_word_save(line_user_id: str, word: str | None) -> str:
+    """處理「單字 入庫」直接入庫指令。"""
+    if not word or not _has_meaningful_content(word):
+        return Messages.SAVE_NO_CONTENT
+
+    async with get_session() as session:
+        service = CommandService(session)
+        result = await service.save_raw(
+            line_user_id=line_user_id,
+            content_text=word,
+        )
     return result.message
 
 

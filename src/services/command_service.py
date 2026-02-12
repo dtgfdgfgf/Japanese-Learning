@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     # (pattern, command_type, requires_keyword)
     (r"^1$", CommandType.CONFIRM_SAVE, False),  # 確認入庫
+    (r"^(.+)\s+save$", CommandType.WORD_SAVE, True),  # 「單字 save」直接入庫
     (r"^入庫$", CommandType.SAVE, False),
     (r"^分析$", CommandType.ANALYZE, False),
     (r"^練習$", CommandType.PRACTICE, False),
@@ -85,7 +86,7 @@ def parse_command(text: str) -> ParsedCommand:
     for pattern, command_type, has_keyword in COMMAND_PATTERNS:
         match = re.match(pattern, normalized, re.IGNORECASE)
         if match:
-            keyword = match.group(1) if has_keyword and match.lastindex else None
+            keyword = match.group(1).strip() if has_keyword and match.lastindex else None
 
             return ParsedCommand(
                 command_type=command_type,

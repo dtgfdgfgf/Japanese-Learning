@@ -203,3 +203,54 @@ class TestSetLangCommand:
         """Test that partial text doesn't match SET_LANG."""
         result = parse_command("學英文")
         assert result.command_type == CommandType.UNKNOWN
+
+
+class TestWordSaveCommand:
+    """Tests for WORD_SAVE command parsing（「單字 入庫」直接入庫）。"""
+
+    def test_word_save_parsed(self):
+        """「するどい save」→ WORD_SAVE，keyword=するどい。"""
+        result = parse_command("するどい save")
+        assert result.command_type == CommandType.WORD_SAVE
+        assert result.keyword == "するどい"
+
+    def test_word_save_multi_word(self):
+        """「hello world save」→ keyword=「hello world」（greedy .+ 匹配多字詞）。"""
+        result = parse_command("hello world save")
+        assert result.command_type == CommandType.WORD_SAVE
+        assert result.keyword == "hello world"
+
+    def test_plain_save_still_works(self):
+        """純「入庫」仍匹配 SAVE（不受 WORD_SAVE pattern 影響）。"""
+        result = parse_command("入庫")
+        assert result.command_type == CommandType.SAVE
+        assert result.keyword is None
+
+    def test_word_save_whitespace(self):
+        """前後空格應正常匹配（strip 後匹配）。"""
+        result = parse_command("  するどい  save  ")
+        assert result.command_type == CommandType.WORD_SAVE
+        assert result.keyword == "するどい"
+
+    def test_word_save_english(self):
+        """英文單字「apple save」→ WORD_SAVE。"""
+        result = parse_command("apple save")
+        assert result.command_type == CommandType.WORD_SAVE
+        assert result.keyword == "apple"
+
+    def test_word_save_kanji(self):
+        """漢字「鋭い save」→ WORD_SAVE。"""
+        result = parse_command("鋭い save")
+        assert result.command_type == CommandType.WORD_SAVE
+        assert result.keyword == "鋭い"
+
+    def test_word_save_case_insensitive(self):
+        """「apple Save」→ case-insensitive 匹配。"""
+        result = parse_command("apple Save")
+        assert result.command_type == CommandType.WORD_SAVE
+        assert result.keyword == "apple"
+
+    def test_bare_save_is_unknown(self):
+        """純「save」不匹配 WORD_SAVE（.+ 需至少一字元 + 空格）。"""
+        result = parse_command("save")
+        assert result.command_type == CommandType.UNKNOWN

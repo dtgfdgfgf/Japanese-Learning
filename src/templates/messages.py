@@ -66,8 +66,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "SAVE_SUCCESS_WITH_HINT": "已入庫：{content_preview}\n\n💡 輸入「分析」來抽取單字和文法",
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
     "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，請在 5 分鐘內輸入「1」即可入庫，輸入其他內容將視為新查詢\n若非你要查的字，請重新輸入正確的拼寫",
-    "PENDING_EXPIRED": "沒有待入庫的內容（可能已超過 5 分鐘）。\n請重新輸入想查詢的單字。",
-    "PENDING_DISCARDED": "⚠️「{word}」的入庫已取消。",
+    "PENDING_EXPIRED": "沒有待入庫的內容（可能已超過 5 分鐘）。\n輸入「單字 save」可直接入庫。",
+    "PENDING_DISCARDED": "⚠️「{word}」的入庫已取消。輸入「{word} save」可直接入庫。",
     "INPUT_NO_MEANINGFUL_CONTENT": "請輸入文字內容（日文或英文），純符號或 emoji 無法處理 🙏\n輸入「說明」查看使用方式",
     "COMMAND_SUGGESTION": "💡 你可能想輸入指令「{command}」\n如果不是，請重新輸入你想查詢的內容",
     "INPUT_URL_DETECTED": "目前不支援直接輸入 URL 🔗\n請複製文章的文字內容後貼上",
@@ -164,6 +164,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "HELP": """📖 可用指令：
 
 • 入庫 - 儲存上一則訊息的學習內容
+• 單字 save - 直接入庫指定單字（例：鋭い save）
 • 分析 - 分析已入庫的內容，抽取單字/文法
 • 練習 - 開始練習題
 • 結束練習 - 中途結束練習
