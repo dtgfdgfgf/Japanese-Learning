@@ -60,12 +60,14 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "ERROR_CLEAR": "清空資料時發生錯誤，請稍後再試",
     "ERROR_CHAT": "抱歉，我現在無法回答這個問題 🙇\n請稍後再試，或輸入「說明」查看我能幫你做什麼。",
     "ERROR_SAVE": "入庫失敗，請稍後再試",
+    "ERROR_COST": "查詢用量時發生錯誤，請稍後再試",
+    "ERROR_STATS": "查詢統計時發生錯誤，請稍後再試",
     
     # ========== 入庫相關 ==========
     "SAVE_SUCCESS": "已入庫：{content_preview}",
     "SAVE_SUCCESS_WITH_HINT": "已入庫：{content_preview}\n\n💡 輸入「分析」來抽取單字和文法",
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
-    "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，請在 5 分鐘內輸入「1」即可入庫，輸入其他內容將視為新查詢\n若非你要查的字，請重新輸入正確的拼寫",
+    "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，請在 5 分鐘內輸入「1」即可入庫\n直接輸入其他單字將取消本次入庫並開始新查詢\n若非你要查的字，請重新輸入正確的拼寫",
     "PENDING_EXPIRED": "沒有待入庫的內容（可能已超過 5 分鐘）。\n輸入「單字 save」可直接入庫。",
     "PENDING_DISCARDED": "⚠️「{word}」的入庫已取消。輸入「{word} save」可直接入庫。",
     "INPUT_NO_MEANINGFUL_CONTENT": "請輸入文字內容（日文或英文），純符號或 emoji 無法處理 🙏\n輸入「說明」查看使用方式",
@@ -111,12 +113,6 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "PRACTICE_RESULT_GOOD": "💪 練習結束！\n得分：{correct}/{total}\n繼續加油！",
     "PRACTICE_RESULT_NEEDS_WORK": "📚 練習結束！\n得分：{correct}/{total}\n多複習一下吧！",
     
-    # 題目格式
-    "QUESTION_VOCAB_RECALL": "{index}. 「{prompt}」的日文是？",
-    "QUESTION_GRAMMAR_CLOZE": "{index}. {prompt}",
-    "QUESTION_VOCAB_MEANING": "{index}. 「{prompt}」是什麼意思？",
-    "QUESTION_GRAMMAR_USAGE": "{index}. {prompt}",
-
     # ========== 統計相關 ==========
     "STATS_SUMMARY": (
         "📊 學習進度\n\n"
@@ -128,13 +124,13 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     
     # ========== 刪除相關 ==========
     "DELETE_NOTHING": "沒有可刪除的資料 📭",
-    "DELETE_LAST_SUCCESS": "已刪除最後一筆（共 {count} 筆資料）🗑️",
     "DELETE_ITEM_HINT": "請輸入要刪除的關鍵字，例如：刪除 食べる",
     "DELETE_ITEM_SUCCESS": "已刪除「{label}」🗑️",
     "DELETE_ITEM_NOT_FOUND": "找不到「{keyword}」相關的項目 📭",
     "DELETE_ITEM_SELECT": "找到 {count} 筆符合「{keyword}」的項目：\n{list}\n\n請輸入編號選擇要刪除的項目（輸入其他內容取消）",
     "DELETE_ITEM_TOO_MANY": "找到 {count} 筆符合「{keyword}」的項目（僅顯示前 5 筆）：\n{list}\n\n請輸入更精確的關鍵字縮小範圍",
     "DELETE_ITEM_INVALID_NUMBER": "請輸入有效的編號（1-{max}），或輸入其他內容取消刪除",
+    "DELETE_SELECT_EXPIRED": "刪除選項已過期，請重新輸入「刪除 <關鍵字>」",
     "DELETE_CONFIRM_PROMPT": (
         "⚠️ 確定要清空所有資料嗎？\n\n"
         "這將刪除：\n"
@@ -154,6 +150,11 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     ),
     
     # ========== 導引訊息 ==========
+    "DELETE_HINT_USAGE": (
+        "如需刪除資料，請使用以下指令：\n"
+        "• 刪除 <關鍵字>（例如：刪除 食べる）\n"
+        "• 清空資料"
+    ),
     "FALLBACK_UNKNOWN": (
         "我不太確定你想做什麼 🤔\n\n"
         "如果你想保存剛才的內容，請輸入「入庫」\n"
@@ -164,24 +165,24 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "HELP": """📖 可用指令：
 
 • 入庫 - 儲存上一則訊息的學習內容
-• 單字 save - 直接入庫指定單字（例：鋭い save）
+• <單字> save - 直接入庫指定單字（例：鋭い save）
 • 分析 - 分析已入庫的內容，抽取單字/文法
 • 練習 - 開始練習題
-• 結束練習 - 中途結束練習
+• 結束練習（或 停止練習）- 中途結束練習
 • 查詢 <關鍵字> - 搜尋已入庫的內容
-• 統計 - 查看學習進度
-• 用量 - 查看 API 使用量與費用
-• 英文/日文 - 切換學習語言
-• 免費模式/便宜模式/嚴謹模式 - 切換 LLM 模式
+• 統計（或 進度）- 查看學習進度
+• 用量（或 cost）- 查看 API 使用量與費用
+• 英文 / 日文 - 切換學習語言
+• 免費模式 / 便宜模式 / 嚴謹模式（或 切換+模式名）- 切換 AI 模式
 • 刪除 <關鍵字> - 刪除指定的單字或文法
 • 清空資料 - 刪除所有資料（需二次確認）
 • 隱私 - 查看資料保存說明
+• 說明（或 幫助 / help）- 顯示本說明
 
 💡 使用方式：
-1. 貼上學習內容（日文或英文）
-2. 輸入「入庫」
-3. 輸入「分析」
-4. 輸入「練習」開始複習！""",
+▸ 查單字：直接輸入單字 → 查看解釋 → 輸入「1」入庫
+▸ 學文章：貼上文章 → 輸入「入庫」→「分析」→「練習」
+（長文章會自動入庫，不需另外輸入「入庫」）""",
     
     # ========== 隱私訊息 ==========
     "PRIVACY": """🔒 隱私說明
@@ -214,7 +215,6 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     # ========== Footer / 模式相關 ==========
     "FOOTER_USAGE": "📊本次：{in_tokens} in + {out_tokens} out ≈ ${cost}｜今日 {pct}%（{used} / {cap}）",
     "FOOTER_MODE": "⚙️模式：{mode_label}｜切換：〔免費〕〔便宜〕〔嚴謹〕",
-    "FOOTER_MODE_ONLY": "⚙️模式：{mode_label}｜切換：〔免費〕〔便宜〕〔嚴謹〕",
     "FOOTER_UPGRADE_HINT": "💡 免費額度剩餘不多，可切換〔嚴謹〕模式獲得更精確回答",
     "FOOTER_COST_ESTIMATE": "💳若改用嚴謹模式：本次約 ${cost:.4f}",
     "FOOTER_CAP_WARNING": "⚠️ 今日免費額度已用完，仍可繼續使用",
@@ -293,6 +293,8 @@ class Messages:
     ERROR_CLEAR: str = _MESSAGES_ZH_TW["ERROR_CLEAR"]
     ERROR_CHAT: str = _MESSAGES_ZH_TW["ERROR_CHAT"]
     ERROR_SAVE: str = _MESSAGES_ZH_TW["ERROR_SAVE"]
+    ERROR_COST: str = _MESSAGES_ZH_TW["ERROR_COST"]
+    ERROR_STATS: str = _MESSAGES_ZH_TW["ERROR_STATS"]
     
     # 入庫
     SAVE_NO_CONTENT: str = _MESSAGES_ZH_TW["SAVE_NO_CONTENT"]
@@ -467,11 +469,6 @@ def format_practice_result(correct: int, total: int) -> str:
     else:
         key = "PRACTICE_RESULT_NEEDS_WORK"
     return Messages.format(key, correct=correct, total=total)
-
-
-def format_delete_last_success(count: int) -> str:
-    """格式化刪除最後一筆成功訊息。"""
-    return Messages.format("DELETE_LAST_SUCCESS", count=count)
 
 
 def format_delete_item_success(label: str) -> str:

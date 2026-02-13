@@ -774,7 +774,7 @@ async def _handle_confirm_save(hashed_uid: str, line_user_id: str) -> str:
         pending_content = await user_state_repo.get_pending_save(hashed_uid)
 
         if not pending_content:
-            return Messages.FALLBACK_UNKNOWN
+            return Messages.PENDING_EXPIRED
 
         service = CommandService(session)
         result = await service.save_raw(
@@ -882,7 +882,7 @@ async def _handle_cost(line_user_id: str) -> str:
             return result.message
         except Exception as e:
             logger.error(f"Cost query failed: {e}")
-            return Messages.ERROR_GENERIC
+            return Messages.ERROR_COST
 
 
 async def _handle_stats(line_user_id: str) -> str:
@@ -897,7 +897,7 @@ async def _handle_stats(line_user_id: str) -> str:
             return result.message
         except Exception as e:
             logger.error(f"Stats query failed: {e}")
-            return Messages.ERROR_GENERIC
+            return Messages.ERROR_STATS
 
 
 async def _handle_practice_answer(hashed_user_id: str, answer_text: str, mode: str = "free", target_lang: str = "ja") -> str:
@@ -1001,7 +1001,7 @@ async def _handle_delete_select(hashed_uid: str, number: int) -> str:
         candidates = await user_state_repo.get_pending_delete(hashed_uid)
 
         if not candidates:
-            return Messages.PENDING_EXPIRED
+            return Messages.format("DELETE_SELECT_EXPIRED")
 
         if number < 1 or number > len(candidates):
             return Messages.format("DELETE_ITEM_INVALID_NUMBER", max=len(candidates))
@@ -1094,6 +1094,11 @@ async def _handle_unknown(
     if _is_likely_romaji(raw_text, target_lang):
         return Messages.format("INPUT_LIKELY_ROMAJI")
 
+    # Edge Case 29: 非支援語言偵測（韓文、泰文等）
+    # 必須在 TSV / 長文本自動入庫之前檢查，避免非支援語言被存入 DB
+    if not _has_supported_language_content(raw_text):
+        return Messages.format("INPUT_UNSUPPORTED_LANG")
+
     # Edge Case 20: TSV 格式偵測（試算表複製貼上）→ 直接入庫
     if '\t' in raw_text:
         return await _save_and_hint(line_user_id, raw_text)
@@ -1102,10 +1107,6 @@ async def _handle_unknown(
     if len(raw_text) > LONG_TEXT_THRESHOLD:
         await _save_raw_content(line_user_id, raw_text)
         return Messages.format("INPUT_LONG_TEXT_SAVED", length=len(raw_text))
-
-    # Edge Case 29: 非支援語言偵測（韓文、泰文等）
-    if not _has_supported_language_content(raw_text):
-        return Messages.format("INPUT_UNSUPPORTED_LANG")
 
     from src.schemas.router import IntentType
     from src.services.router_service import get_router_service
@@ -1181,7 +1182,7 @@ async def _handle_unknown(
             return await _handle_analyze(line_user_id, mode, target_lang)
 
         if classification.intent == IntentType.DELETE:
-            return "如需刪除資料，請使用以下指令：\n• 刪除 <關鍵字>（例如：刪除 食べる）\n• 清空資料"
+            return Messages.format("DELETE_HINT_USAGE")
 
         if classification.intent == IntentType.SEARCH and classification.keyword:
             items = await _search_user_items(hashed_user_id, classification.keyword)

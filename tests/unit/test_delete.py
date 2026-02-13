@@ -6,61 +6,11 @@ DoD: 測試軟刪除邏輯；驗證 is_deleted flag 正確設定
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timedelta, timezone
 import uuid
 
 from src.services.delete_service import DeleteService
-
-
-class TestDeleteService:
-    """Tests for DeleteService."""
-
-    @pytest.fixture
-    def mock_session(self):
-        """Create mock database session."""
-        session = AsyncMock()
-        session.execute = AsyncMock()
-        session.flush = AsyncMock()
-        session.commit = AsyncMock()
-        return session
-
-    @pytest.mark.asyncio
-    async def test_delete_last_no_data(self, mock_session):
-        """Test delete_last when no data exists."""
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute.return_value = mock_result
-
-        service = DeleteService(mock_session)
-
-        count, message = await service.delete_last("test_user_hash")
-
-        assert count == 0
-        assert "沒有可刪除的資料" in message
-
-    @pytest.mark.asyncio
-    async def test_delete_last_success(self, mock_session):
-        """Test successful delete_last."""
-        mock_raw = MagicMock()
-        mock_raw.raw_id = uuid.uuid4()
-
-        mock_doc = MagicMock()
-        mock_doc.doc_id = uuid.uuid4()
-
-        with patch.object(DeleteService, '_get_latest_raw', return_value=mock_raw):
-            with patch.object(DeleteService, '_get_doc_by_raw', return_value=mock_doc):
-                with patch.object(DeleteService, '_delete_items_by_doc', return_value=3):
-                    service = DeleteService(mock_session)
-                    service.raw_repo = MagicMock()
-                    service.raw_repo.soft_delete = AsyncMock(return_value=True)
-                    service.doc_repo = MagicMock()
-                    service.doc_repo.soft_delete = AsyncMock(return_value=True)
-
-                    count, message = await service.delete_last("test_user_hash")
-
-                    assert count > 0
-                    assert "已刪除" in message
 
 
 class TestUserStateConfirmation:

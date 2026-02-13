@@ -7,7 +7,6 @@ from src.templates.messages import (
     Locale,
     Messages,
     format_delete_clear_success,
-    format_delete_last_success,
     format_practice_answer_wrong,
     format_practice_insufficient,
     format_practice_result,
@@ -26,7 +25,6 @@ __all__ = [
     "get_message",
     # 格式化輔助函數
     "format_delete_clear_success",
-    "format_delete_last_success",
     "format_practice_answer_wrong",
     "format_practice_insufficient",
     "format_practice_result",

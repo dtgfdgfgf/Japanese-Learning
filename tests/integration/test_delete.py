@@ -17,67 +17,6 @@ from src.main import app
 from tests.conftest import create_message_event, create_mock_db_session
 
 
-class TestDeleteLastIntegration:
-    """Integration tests for delete_last command."""
-
-    def _create_signature(self, body: bytes, secret: str) -> str:
-        """Create LINE signature for testing."""
-        return hmac.new(
-            secret.encode("utf-8"),
-            body,
-            hashlib.sha256
-        ).hexdigest()
-
-    @pytest.mark.asyncio
-    async def test_delete_last_command(self):
-        """Test 刪除最後一筆 command flow."""
-        user_id = "Utest_delete_last"
-        channel_secret = "test_secret_for_testing_only"
-        
-        body = json.dumps({
-            "destination": "Uxxxxx",
-            "events": [{
-                "type": "message",
-                "message": {"type": "text", "id": "1", "text": "刪除最後一筆"},
-                "timestamp": 1625665600000,
-                "source": {"type": "user", "userId": user_id},
-                "replyToken": "token1",
-                "mode": "active"
-            }]
-        }).encode("utf-8")
-        
-        signature = self._create_signature(body, channel_secret)
-
-        with patch("src.api.webhook.get_line_client") as mock_line:
-            mock_client = MagicMock()
-            mock_client.verify_signature.return_value = True
-            mock_client.reply_message = AsyncMock()
-            mock_client.parse_events.return_value = [
-                create_message_event(text="刪除最後一筆", user_id=user_id, reply_token="token1")
-            ]
-            mock_line.return_value = mock_client
-            
-            with patch("src.api.webhook.get_session") as mock_session_ctx:
-                mock_session = AsyncMock()
-                mock_session.commit = AsyncMock()
-                mock_session_ctx.return_value.__aenter__.return_value = mock_session
-                
-                with patch("src.services.delete_service.DeleteService.delete_last") as mock_delete:
-                    mock_delete.return_value = (1, "已刪除最後一筆（共 1 筆資料）🗑️")
-                    
-                    transport = ASGITransport(app=app)
-                    async with AsyncClient(transport=transport, base_url="http://test") as client:
-                        response = await client.post(
-                            "/webhook",
-                            content=body,
-                            headers={
-                                "X-Line-Signature": signature,
-                                "Content-Type": "application/json"
-                            }
-                        )
-                        assert response.status_code == 200
-
-
 class TestClearAllIntegration:
     """Integration tests for clear all data flow."""
 

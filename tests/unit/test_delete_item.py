@@ -297,7 +297,7 @@ class TestHandleDeleteSelect:
             with patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo):
                 result = await _handle_delete_select("hashed_123", 1)
 
-        assert "超過 5 分鐘" in result or "沒有待入庫" in result
+        assert "刪除選項已過期" in result
 
 
 # ============================================================================

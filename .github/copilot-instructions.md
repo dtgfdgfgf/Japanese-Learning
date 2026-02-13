@@ -228,15 +228,40 @@ User (LINE) ─┬─ raw_messages (1:N)
 
 ## 🎮 Commands Reference
 
-| Command | Trigger | Description |
-|---------|---------|-------------|
-| `入庫` | Exact match | 保存前一則訊息為素材 |
-| `分析` | Exact match | 對 deferred 文件執行 LLM 抽取 |
-| `練習` | Exact match | 從 items 出 5 題 |
-| `查詢 <keyword>` | Pattern | 搜尋 vocab/grammar |
-| `刪除最後一筆` | Exact match | 軟刪除最近一筆 |
-| `清空資料` | Exact match | 需二次確認 |
-| `隱私` | Exact match | 顯示隱私政策 |
+### 硬規則指令（regex 精確匹配，confidence=1.0）
+
+| Command | Trigger Pattern | Description |
+|---------|----------------|-------------|
+| `入庫` | `^入庫$` | 保存 `last_message` 為素材（raw_message + document deferred） |
+| `<單字> save` | `^(.+)\s+save$` | 直接入庫指定單字（例：`鋭い save`） |
+| `1` | `^1$` | 確認入庫（pending_save 流程）或選擇刪除項目（pending_delete 流程） |
+| `分析` | `^分析$` | 對最近一筆 deferred 文件執行 LLM Extractor |
+| `練習` | `^練習$` | 從 items 出 5 題（priority: 新增 > 高錯誤率 > 久未練 > 隨機） |
+| `結束練習` / `停止練習` | `^(結束練習\|停止練習)$` | 中途結束當前練習 session |
+| `查詢 <keyword>` | `^查詢\s+(.+)$` | 搜尋 vocab/grammar（surface/reading/pattern） |
+| `查詢` | `^查詢$` | 缺少關鍵字時顯示提示 |
+| `刪除 <keyword>` | `^刪除\s+(.+)$` | 搜尋並刪除指定 item（1 筆直接刪，2-5 筆列表選擇，>5 筆請更精確） |
+| `刪除` | `^刪除$` | 缺少關鍵字時顯示提示 |
+| `清空資料` | `^清空資料$` | 設置確認狀態，等待二次確認（60 秒 TTL） |
+| `確定清空資料` | `^確定清空資料$` | 二次確認後軟刪除使用者所有資料 |
+| `說明` / `幫助` / `help` | `^(說明\|幫助\|help)$` | 顯示所有可用指令 |
+| `用量` / `cost` | `^(用量\|cost)$` | 查詢 API 用量（本月 + 累計，按 model 分組） |
+| `統計` / `進度` | `^(統計\|進度)$` | 查詢學習進度（素材數、練習數、正確率、7 日趨勢） |
+| `免費模式` / `便宜模式` / `嚴謹模式` | `^(免費模式\|便宜模式\|嚴謹模式)$` | 切換 LLM 模式 |
+| `切換免費` / `切換便宜` / `切換嚴謹` | `^切換(免費\|便宜\|嚴謹)$` | 切換 LLM 模式（另一種觸發方式） |
+| `英文` / `日文` | `^(英文\|日文)$` | 切換學習目標語言 |
+| `隱私` | `^隱私$` | 顯示隱私政策 |
+
+### Dispatch 狀態守衛
+
+Pre-dispatch 階段依序檢查 `pending_delete` → `pending_save` → `has_session`，符合條件則優先處理對應邏輯。
+
+**PENDING_SAFE_COMMANDS**（不中斷 pending 狀態的安全指令）：
+`HELP`, `MODE_SWITCH`, `SET_LANG`, `COST`, `STATS`, `PRIVACY`, `EXIT_PRACTICE`, `WORD_SAVE`
+
+### LLM Router Fallback（UNKNOWN 指令）
+
+未匹配硬規則時，經過 edge case 過濾後交由 `RouterService.classify()` 進行 LLM 意圖分類，支援 intent：`save`, `analyze`, `practice`, `search`, `delete`, `help`, `chat`, `unknown`。
 
 ---
 
