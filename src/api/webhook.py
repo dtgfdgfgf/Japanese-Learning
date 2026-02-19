@@ -1134,9 +1134,12 @@ async def _handle_unknown(
                 if db_items:
                     return _format_search_results(db_items)
                 # DB 無紀錄：LLM 解釋 + 詢問入庫
-                explanation = await router_service.get_word_explanation(
-                    word, mode=mode, target_lang=target_lang
-                )
+                try:
+                    explanation = await router_service.get_word_explanation(
+                        word, mode=mode, target_lang=target_lang
+                    )
+                except Exception:
+                    return "API呼叫失敗，請聯絡開發者"
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
                     await user_state_repo.set_pending_save(hashed_user_id, word)
@@ -1152,9 +1155,12 @@ async def _handle_unknown(
                 if is_multi_word:
                     # 處理第一個單字，提示其餘逐一輸入
                     first_word = tokens[0]
-                    explanation = await router_service.get_word_explanation(
-                        first_word, mode=mode, target_lang=target_lang
-                    )
+                    try:
+                        explanation = await router_service.get_word_explanation(
+                            first_word, mode=mode, target_lang=target_lang
+                        )
+                    except Exception:
+                        return "API呼叫失敗，請聯絡開發者"
                     async with get_session() as session:
                         user_state_repo = UserStateRepository(session)
                         await user_state_repo.set_pending_save(hashed_user_id, first_word)
@@ -1192,9 +1198,12 @@ async def _handle_unknown(
             # DB 無結果 + 單字 → LLM 解釋 + 詢問入庫
             keyword = classification.keyword
             if _is_single_word(keyword, target_lang):
-                explanation = await router_service.get_word_explanation(
-                    keyword, mode=mode, target_lang=target_lang
-                )
+                try:
+                    explanation = await router_service.get_word_explanation(
+                        keyword, mode=mode, target_lang=target_lang
+                    )
+                except Exception:
+                    return "API呼叫失敗，請聯絡開發者"
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
                     await user_state_repo.set_pending_save(hashed_user_id, keyword)

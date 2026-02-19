@@ -405,18 +405,16 @@ class TestWordExplanation:
         assert len(response) > 0
 
     @pytest.mark.asyncio
-    async def test_word_explanation_error_fallback(self):
-        """LLM 錯誤時回傳 fallback 訊息。"""
+    async def test_word_explanation_error_raises(self):
+        """LLM 錯誤時重新拋出例外，讓呼叫端處理。"""
         service = RouterService()
         service.llm_client = MagicMock()
         service.llm_client.complete_with_mode = AsyncMock(
             side_effect=Exception("LLM Error")
         )
 
-        response = await service.get_word_explanation("test")
-
-        # 應回傳包含原單字的 fallback
-        assert "test" in response
+        with pytest.raises(Exception, match="LLM Error"):
+            await service.get_word_explanation("test")
 
     @pytest.mark.asyncio
     async def test_word_explanation_uses_correct_mode(self):

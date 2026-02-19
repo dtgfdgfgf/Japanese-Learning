@@ -330,3 +330,90 @@ class TestSearchIntentDbHit:
         assert "食べる" in result
         # 不應呼叫 LLM 解釋
         mock_router.get_word_explanation.assert_not_called()
+
+
+# ============================================================================
+# LLM API 失敗時的錯誤處理
+# ============================================================================
+
+
+class TestWordExplanationApiFailure:
+    """LLM API 呼叫失敗時，回傳錯誤訊息且不設 pending_save。"""
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_save_intent_api_failure(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+        mock_session_ctx: MagicMock,
+    ) -> None:
+        """SAVE intent 短單字 LLM 失敗 → 回傳錯誤訊息，不設 pending_save。"""
+        from src.schemas.router import IntentType, RouterResponse
+
+        mock_router = MagicMock()
+        mock_router.classify = AsyncMock(
+            return_value=RouterResponse(
+                intent=IntentType.SAVE, confidence=0.9, reason="single word"
+            )
+        )
+        mock_router.get_word_explanation = AsyncMock(
+            side_effect=Exception("Gemini API error")
+        )
+        mock_get_router.return_value = mock_router
+        mock_search.return_value = []
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_ctx.return_value = mock_session
+
+        mock_user_state_repo = MagicMock()
+        mock_user_state_repo.set_pending_save = AsyncMock()
+
+        with patch(
+            "src.api.webhook.UserStateRepository",
+            return_value=mock_user_state_repo,
+        ):
+            result = await _handle_unknown("Utest", "spell", mode="free", target_lang="en")
+
+        assert "API呼叫失敗" in result
+        mock_user_state_repo.set_pending_save.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_search_intent_api_failure(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+        mock_session_ctx: MagicMock,
+    ) -> None:
+        """SEARCH intent 單字 LLM 失敗 → 回傳錯誤訊息。"""
+        from src.schemas.router import IntentType, RouterResponse
+
+        mock_router = MagicMock()
+        mock_router.classify = AsyncMock(
+            return_value=RouterResponse(
+                intent=IntentType.SEARCH,
+                confidence=0.85,
+                keyword="spell",
+                reason="search intent",
+            )
+        )
+        mock_router.get_word_explanation = AsyncMock(
+            side_effect=Exception("API timeout")
+        )
+        mock_get_router.return_value = mock_router
+        mock_search.return_value = []
+
+        result = await _handle_unknown("Utest", "spell", mode="free", target_lang="en")
+
+        assert "API呼叫失敗" in result

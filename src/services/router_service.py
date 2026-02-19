@@ -308,7 +308,7 @@ class RouterService:
 
         except Exception as e:
             logger.error(f"Word explanation generation failed: {e}")
-            return f"「{word}」"
+            raise
 
 
 # 模組層級 singleton
