@@ -32,7 +32,7 @@ from src.lib.security import hash_user_id
 from src.models.item import Item
 from src.repositories.user_profile_repo import UserProfileRepository
 from src.repositories.user_state_repo import UserStateRepository
-from src.schemas.command import CommandType, ParsedCommand
+from src.schemas.command import CommandResult, CommandType, ParsedCommand
 from src.services.command_service import (
     LANG_NAME_MAP,
     MODE_NAME_MAP,
@@ -42,12 +42,16 @@ from src.services.command_service import (
 from src.services.practice_service import has_active_session
 from src.templates.messages import (
     Messages,
+    format_help_with_status,
     format_lang_switch_confirm,
     format_mode_switch_confirm,
+    format_save_success,
     format_search_no_result,
     format_search_result_header,
     format_search_result_more,
     format_usage_footer,
+    format_word_multi_detected,
+    truncate_content_preview,
 )
 
 if TYPE_CHECKING:
@@ -690,10 +694,7 @@ async def _dispatch_command(
     command_type = command.command_type
 
     if command_type == CommandType.HELP:
-        from src.templates.messages import MODE_LABELS
-        mode_label = MODE_LABELS.get(mode, mode)
-        lang_label = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
-        return f"{Messages.HELP}\n\n⚙️ 目前模式：{mode_label}｜學習語言：{lang_label}"
+        return format_help_with_status(mode, target_lang)
 
     if command_type == CommandType.PRIVACY:
         return Messages.PRIVACY
@@ -1105,7 +1106,9 @@ async def _handle_unknown(
 
     # Edge Case 26: 超長文本直接入庫（跳過 Router 節省 LLM tokens）
     if len(raw_text) > LONG_TEXT_THRESHOLD:
-        await _save_raw_content(line_user_id, raw_text)
+        save_result = await _save_raw_content(line_user_id, raw_text)
+        if not save_result.success:
+            return save_result.message
         return Messages.format("INPUT_LONG_TEXT_SAVED", length=len(raw_text))
 
     from src.lib.llm_client import LLMResponse, LLMTrace
@@ -1151,7 +1154,7 @@ async def _handle_unknown(
                     )
                     _collect_trace(word_resp, "word_explanation")
                 except Exception:
-                    return "API呼叫失敗，請聯絡開發者"
+                    return Messages.ERROR_API_CALL
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
                     await user_state_repo.set_pending_save(hashed_user_id, word)
@@ -1173,13 +1176,13 @@ async def _handle_unknown(
                         )
                         _collect_trace(word_resp, "word_explanation")
                     except Exception:
-                        return "API呼叫失敗，請聯絡開發者"
+                        return Messages.ERROR_API_CALL
                     async with get_session() as session:
                         user_state_repo = UserStateRepository(session)
                         await user_state_repo.set_pending_save(hashed_user_id, first_word)
                     remaining = "、".join(f"「{t}」" for t in tokens[1:])
                     base = Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
-                    return f"{base}\n\n💡 偵測到多個單字，目前處理「{first_word}」。{remaining} 請逐一輸入。"
+                    return f"{base}\n\n{format_word_multi_detected(first_word, remaining)}"
                 else:
                     # 長文本：直接入庫
                     return await _save_and_hint(line_user_id, raw_text)
@@ -1192,10 +1195,7 @@ async def _handle_unknown(
             return chat_resp.content
 
         if classification.intent == IntentType.HELP:
-            from src.templates.messages import MODE_LABELS
-            mode_label = MODE_LABELS.get(mode, mode)
-            lang_label = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
-            return f"{Messages.HELP}\n\n⚙️ 目前模式：{mode_label}｜學習語言：{lang_label}"
+            return format_help_with_status(mode, target_lang)
 
         if classification.intent == IntentType.PRACTICE:
             return await _handle_practice(line_user_id, mode, target_lang)
@@ -1220,7 +1220,7 @@ async def _handle_unknown(
                     )
                     _collect_trace(word_resp, "word_explanation")
                 except Exception:
-                    return "API呼叫失敗，請聯絡開發者"
+                    return Messages.ERROR_API_CALL
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
                     await user_state_repo.set_pending_save(hashed_user_id, keyword)
@@ -1252,11 +1252,11 @@ async def _handle_unknown(
                 logger.warning("Failed to write LLM traces to DB", exc_info=True)
 
 
-async def _save_raw_content(line_user_id: str, content: str) -> None:
-    """入庫原始內容（不回傳訊息）。"""
+async def _save_raw_content(line_user_id: str, content: str) -> CommandResult:
+    """入庫原始內容。"""
     async with get_session() as session:
         service = CommandService(session)
-        await service.save_raw(line_user_id=line_user_id, content_text=content)
+        return await service.save_raw(line_user_id=line_user_id, content_text=content)
 
 
 async def _save_and_hint(line_user_id: str, content: str) -> str:
@@ -1264,7 +1264,10 @@ async def _save_and_hint(line_user_id: str, content: str) -> str:
     async with get_session() as session:
         service = CommandService(session)
         result = await service.save_raw(line_user_id=line_user_id, content_text=content)
-    return f"{result.message}\n\n💡 輸入「分析」來抽取單字和文法"
+    if not result.success:
+        return result.message
+    content_preview = truncate_content_preview(content)
+    return format_save_success(content_preview, with_hint=True)
 
 
 # ============================================================================

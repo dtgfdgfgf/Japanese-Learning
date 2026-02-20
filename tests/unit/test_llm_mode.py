@@ -4,12 +4,12 @@ complete_with_mode 的單元測試。
 測試 provider 分派、mode 映射（無 fallback）。
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.lib.llm_client import LLMClient, LLMResponse, MODE_MODEL_MAP
-
+from src.lib.llm_client import MODE_MODEL_MAP, LLMClient
 
 # ============================================================================
 # MODE_MODEL_MAP 映射
@@ -156,4 +156,32 @@ class TestCallProviderDispatch:
             await client._call_provider(
                 provider="azure", model="test",
                 system_prompt="s", user_message="u", temperature=0.5,
+            )
+
+
+class TestGoogleTimeout:
+    """測試 Gemini 呼叫 timeout 行為。"""
+
+    @pytest.mark.asyncio
+    @patch.object(LLMClient, "__init__", lambda self, **kw: None)
+    async def test_call_google_timeout(self):
+        """_call_google 應套用 client timeout。"""
+        client = LLMClient.__new__(LLMClient)
+        client.timeout = 0.01
+        client._gemini_configured = True
+
+        async def _slow_generate_content(**kwargs):
+            await asyncio.sleep(0.05)
+            return MagicMock(text="ok", usage_metadata=None)
+
+        mock_models = MagicMock()
+        mock_models.generate_content = AsyncMock(side_effect=_slow_generate_content)
+        client._gemini_client = MagicMock()
+        client._gemini_client.aio.models = mock_models
+
+        with pytest.raises(TimeoutError):
+            await client._call_google(
+                system_prompt="s",
+                user_message="u",
+                temperature=0.3,
             )

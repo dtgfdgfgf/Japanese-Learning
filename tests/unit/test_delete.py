@@ -179,6 +179,31 @@ class TestDeleteItem:
         assert "【" not in label  # 不應有【reading】
 
 
+class TestClearAllData:
+    """Tests for DeleteService.clear_all_data."""
+
+    @pytest.fixture
+    def mock_session(self):
+        session = AsyncMock()
+        session.execute = AsyncMock()
+        session.flush = AsyncMock()
+        return session
+
+    @pytest.mark.asyncio
+    async def test_clear_all_data_includes_practice_logs(self, mock_session):
+        """清空資料需包含練習紀錄並反映在回傳訊息。"""
+        service = DeleteService(mock_session)
+        service._soft_delete_all_items = AsyncMock(return_value=3)
+        service._soft_delete_all_practice_logs = AsyncMock(return_value=4)
+        service._soft_delete_all_docs = AsyncMock(return_value=2)
+        service._soft_delete_all_raws = AsyncMock(return_value=1)
+
+        deleted_count, message = await service.clear_all_data("test_user_hash")
+
+        assert deleted_count == 10
+        assert "4 筆練習紀錄" in message
+
+
 class TestSoftDeleteFlags:
     """Tests for soft delete flag behavior."""
 

@@ -205,11 +205,12 @@ class LLMClient:
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
 
-        response = await self._gemini_client.aio.models.generate_content(
-            model=model,
-            contents=user_message,
-            config=types.GenerateContentConfig(**config_kwargs),
-        )
+        async with asyncio.timeout(self.timeout):
+            response = await self._gemini_client.aio.models.generate_content(
+                model=model,
+                contents=user_message,
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
 
         content = response.text or ""
         usage = response.usage_metadata

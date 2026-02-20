@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.document import Document
 from src.models.item import Item
+from src.models.practice_log import PracticeLog
 from src.models.raw_message import RawMessage
 from src.repositories.item_repo import ItemRepository
 from src.templates.messages import (
@@ -89,6 +90,10 @@ class DeleteService:
         items_deleted = await self._soft_delete_all_items(user_id)
         deleted_count += items_deleted
 
+        # Soft delete all practice logs
+        practice_logs_deleted = await self._soft_delete_all_practice_logs(user_id)
+        deleted_count += practice_logs_deleted
+
         # Soft delete all documents
         docs_deleted = await self._soft_delete_all_docs(user_id)
         deleted_count += docs_deleted
@@ -103,6 +108,7 @@ class DeleteService:
             raws=raws_deleted,
             docs=docs_deleted,
             items=items_deleted,
+            practice_logs=practice_logs_deleted,
         )
 
     async def _soft_delete_all_items(self, user_id: str) -> int:
@@ -123,6 +129,18 @@ class DeleteService:
             update(Document)
             .where(Document.user_id == user_id)
             .where(Document.is_deleted.is_(False))
+            .values(is_deleted=True)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount
+
+    async def _soft_delete_all_practice_logs(self, user_id: str) -> int:
+        """Soft delete all practice logs for user."""
+        stmt = (
+            update(PracticeLog)
+            .where(PracticeLog.user_id == user_id)
+            .where(PracticeLog.is_deleted.is_(False))
             .values(is_deleted=True)
         )
         result = await self.session.execute(stmt)

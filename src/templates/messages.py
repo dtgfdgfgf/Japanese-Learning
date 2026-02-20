@@ -62,12 +62,14 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "ERROR_SAVE": "入庫失敗，請稍後再試",
     "ERROR_COST": "查詢用量時發生錯誤，請稍後再試",
     "ERROR_STATS": "查詢統計時發生錯誤，請稍後再試",
+    "ERROR_API_CALL": "API呼叫失敗，請聯絡開發者",
     
     # ========== 入庫相關 ==========
     "SAVE_SUCCESS": "已入庫：{content_preview}",
     "SAVE_SUCCESS_WITH_HINT": "已入庫：{content_preview}\n\n💡 輸入「分析」來抽取單字和文法",
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
     "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，請在 5 分鐘內輸入「1」即可入庫\n直接輸入其他單字將取消本次入庫並開始新查詢\n若非你要查的字，請重新輸入正確的拼寫",
+    "WORD_MULTI_DETECTED": "💡 偵測到多個單字，目前處理「{first_word}」。{remaining} 請逐一輸入。",
     "PENDING_EXPIRED": "沒有待入庫的內容（可能已超過 5 分鐘）。\n輸入「單字 save」可直接入庫。",
     "PENDING_DISCARDED": "⚠️「{word}」的入庫已取消。輸入「{word} save」可直接入庫。",
     "INPUT_NO_MEANINGFUL_CONTENT": "請輸入文字內容（日文或英文），純符號或 emoji 無法處理 🙏\n輸入「說明」查看使用方式",
@@ -146,7 +148,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
         "刪除了：\n"
         "• {raws} 筆原始訊息\n"
         "• {docs} 筆文件\n"
-        "• {items} 筆單字/文法"
+        "• {items} 筆單字/文法\n"
+        "• {practice_logs} 筆練習紀錄"
     ),
     
     # ========== 導引訊息 ==========
@@ -183,6 +186,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 ▸ 查單字：直接輸入單字 → 查看解釋 → 輸入「1」入庫
 ▸ 學文章：貼上文章 → 輸入「入庫」→「分析」→「練習」
 （長文章會自動入庫，不需另外輸入「入庫」）""",
+    "HELP_WITH_STATUS": "{help_message}\n\n⚙️ 目前模式：{mode_label}｜學習語言：{lang_label}",
     
     # ========== 隱私訊息 ==========
     "PRIVACY": """🔒 隱私說明
@@ -296,6 +300,7 @@ class Messages:
     ERROR_SAVE: str = _MESSAGES_ZH_TW["ERROR_SAVE"]
     ERROR_COST: str = _MESSAGES_ZH_TW["ERROR_COST"]
     ERROR_STATS: str = _MESSAGES_ZH_TW["ERROR_STATS"]
+    ERROR_API_CALL: str = _MESSAGES_ZH_TW["ERROR_API_CALL"]
     
     # 入庫
     SAVE_NO_CONTENT: str = _MESSAGES_ZH_TW["SAVE_NO_CONTENT"]
@@ -482,9 +487,20 @@ def format_delete_item_not_found(keyword: str) -> str:
     return Messages.format("DELETE_ITEM_NOT_FOUND", keyword=keyword)
 
 
-def format_delete_clear_success(raws: int, docs: int, items: int) -> str:
+def format_delete_clear_success(
+    raws: int,
+    docs: int,
+    items: int,
+    practice_logs: int = 0,
+) -> str:
     """格式化清空資料成功訊息。"""
-    return Messages.format("DELETE_CLEAR_SUCCESS", raws=raws, docs=docs, items=items)
+    return Messages.format(
+        "DELETE_CLEAR_SUCCESS",
+        raws=raws,
+        docs=docs,
+        items=items,
+        practice_logs=practice_logs,
+    )
 
 
 # ============================================================================
@@ -587,10 +603,31 @@ def format_lang_switch_confirm(lang: str) -> str:
     return Messages.format("LANG_SWITCH_CONFIRM", lang_name=lang_name)
 
 
+def format_help_with_status(mode: str, target_lang: str) -> str:
+    """格式化 HELP 並附上目前模式與學習語言。"""
+    mode_label = MODE_LABELS.get(mode, mode)
+    lang_label = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
+    return Messages.format(
+        "HELP_WITH_STATUS",
+        help_message=Messages.HELP,
+        mode_label=mode_label,
+        lang_label=lang_label,
+    )
+
+
 def format_mode_switch_confirm(mode: str) -> str:
     """格式化模式切換確認訊息。"""
     mode_label = MODE_LABELS.get(mode, mode)
     return Messages.format("MODE_SWITCH_CONFIRM", mode_label=mode_label)
+
+
+def format_word_multi_detected(first_word: str, remaining: str) -> str:
+    """格式化多單字輸入提醒訊息。"""
+    return Messages.format(
+        "WORD_MULTI_DETECTED",
+        first_word=first_word,
+        remaining=remaining,
+    )
 
 
 def format_stats_summary(
