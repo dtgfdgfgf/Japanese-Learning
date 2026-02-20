@@ -1126,6 +1126,24 @@ async def _handle_unknown(
             llm_traces.append((resp.to_trace(), operation))
 
     try:
+        # 短單字直接翻譯（跳過 Router LLM 節省一次 API 呼叫）
+        if _is_short_word_input(raw_text, target_lang):
+            word = raw_text.strip()
+            db_items = await _search_user_items(hashed_user_id, word)
+            if db_items:
+                return _format_search_results(db_items)
+            try:
+                word_resp = await router_service.get_word_explanation(
+                    word, mode=mode, target_lang=target_lang
+                )
+                _collect_trace(word_resp, "word_explanation")
+            except Exception:
+                return Messages.ERROR_API_CALL
+            async with get_session() as session:
+                user_state_repo = UserStateRepository(session)
+                await user_state_repo.set_pending_save(hashed_user_id, word)
+            return Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
+
         classification, classify_resp = await router_service.classify(
             raw_text, mode=mode, target_lang=target_lang,
         )
@@ -1281,6 +1299,37 @@ def _is_single_word(text: str, target_lang: str) -> bool:
     if len(stripped.split()) != 1:
         return False
     return len(stripped) <= 15 if target_lang == "ja" else len(stripped) <= 30
+
+
+def _is_short_word_input(text: str, target_lang: str) -> bool:
+    """判斷輸入是否為可直接翻譯的單一詞彙（跳過 Router LLM）。
+
+    條件：
+    - 單一 token（無空格）
+    - 非問句
+    - 語言符合 target_lang 且長度在合理範圍內
+    """
+    stripped = text.strip()
+
+    # 必須是單一 token
+    if len(stripped.split()) != 1:
+        return False
+
+    # 問句不攔截，交給 Router 判斷 CHAT
+    if any(q in stripped for q in ("?", "？", "嗎", "什麼", "怎麼", "如何")):
+        return False
+
+    if target_lang == "en":
+        # 英文模式：主要由 ASCII 字母組成（允許連字符，如 "well-known"）
+        alpha_chars = sum(1 for c in stripped if c.isalpha() and c.isascii())
+        total = max(len(stripped), 1)
+        return alpha_chars / total > 0.8 and 1 <= len(stripped) <= 30
+
+    else:  # ja
+        # 日文模式：必須含假名或漢字
+        has_kana = any('\u3040' <= c <= '\u30ff' or '\uff65' <= c <= '\uff9f' for c in stripped)
+        has_cjk = any('\u4e00' <= c <= '\u9fff' for c in stripped)
+        return (has_kana or has_cjk) and 1 <= len(stripped) <= 15
 
 
 async def _search_user_items(hashed_user_id: str, keyword: str, limit: int = MAX_SEARCH_RESULTS) -> list[Item]:
