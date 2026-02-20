@@ -129,8 +129,6 @@ class CostService:
         # 計算總費用
         all_time_total = sum(s.total_cost_usd for s in all_time_summary)
         month_total = sum(s.total_cost_usd for s in month_summary)
-        all_time_mode_summary = _aggregate_mode_summary(all_time_summary)
-        month_mode_summary = _aggregate_mode_summary(month_summary)
 
         # 格式化回應
         message = format_cost_summary(
@@ -138,8 +136,6 @@ class CostService:
             month_summary=month_summary,
             all_time_total=all_time_total,
             month_total=month_total,
-            all_time_mode_summary=all_time_mode_summary,
-            month_mode_summary=month_mode_summary,
         )
 
         return CommandResult.ok(

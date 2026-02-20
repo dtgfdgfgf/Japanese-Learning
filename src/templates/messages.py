@@ -214,6 +214,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "COST_MONTH_SECTION": "\n\n📅 本月",
     "COST_ALLTIME_SECTION": "\n\n📈 累計",
     "COST_PROVIDER_HEADER": "\n🔹 {provider}",
+    "COST_PROVIDER_SUMMARY_LINE": "\n🔹 {provider}：${cost:.4f}｜{total_tokens} tokens（{in_tokens} in / {out_tokens} out，{count} 次）",
     "COST_MODEL_LINE": "\n  • {model}: ${cost:.4f} ({count} 次)",
     "COST_TOTAL_LINE": "\n💰 總計：${total:.4f}",
     "COST_MONTH_MODE_SECTION": "\n\n🧭 本月（依模式）",
@@ -658,8 +659,8 @@ def format_stats_summary(
 
 
 _PROVIDER_DISPLAY_NAMES: dict[str, str] = {
-    "anthropic": "Anthropic",
-    "google": "Google",
+    "anthropic": "CLAUDE",
+    "google": "GEMINI",
 }
 
 
@@ -667,15 +668,38 @@ def _format_provider_grouped(summary_list: list) -> list[str]:
     """將 UsageSummary 列表按 provider 分組格式化。"""
     from collections import defaultdict
 
-    grouped: dict[str, list] = defaultdict(list)
+    grouped: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {
+            "cost": 0.0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "call_count": 0,
+            "models": [],
+        }
+    )
     for s in summary_list:
-        grouped[s.provider].append(s)
+        bucket = grouped[s.provider]
+        bucket["cost"] += s.total_cost_usd
+        bucket["input_tokens"] += s.total_input_tokens
+        bucket["output_tokens"] += s.total_output_tokens
+        bucket["call_count"] += s.call_count
+        bucket["models"].append(s)
 
     lines: list[str] = []
     for provider in sorted(grouped.keys()):
         display_name = _PROVIDER_DISPLAY_NAMES.get(provider, provider)
-        lines.append(Messages.format("COST_PROVIDER_HEADER", provider=display_name))
-        for s in grouped[provider]:
+        bucket = grouped[provider]
+        total_tokens = bucket["input_tokens"] + bucket["output_tokens"]
+        lines.append(Messages.format(
+            "COST_PROVIDER_SUMMARY_LINE",
+            provider=display_name,
+            cost=bucket["cost"],
+            total_tokens=f"{total_tokens:,}",
+            in_tokens=f"{bucket['input_tokens']:,}",
+            out_tokens=f"{bucket['output_tokens']:,}",
+            count=bucket["call_count"],
+        ))
+        for s in bucket["models"]:
             lines.append(Messages.format(
                 "COST_MODEL_LINE",
                 model=s.model,

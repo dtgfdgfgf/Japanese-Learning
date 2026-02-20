@@ -39,7 +39,7 @@ class TestFormatCostSummary:
         assert "尚無" in result
 
     def test_single_provider_month_and_alltime(self) -> None:
-        """單一 provider（Anthropic）同時出現在本月與累計。"""
+        """單一 provider（CLAUDE）同時出現在本月與累計。"""
         summary = FakeUsageSummary(
             provider="anthropic",
             model="claude-sonnet-4-5-20250929",
@@ -55,10 +55,11 @@ class TestFormatCostSummary:
             month_total=0.0105,
         )
 
-        assert "Anthropic" in result
+        assert "CLAUDE" in result
         assert "claude-sonnet-4-5-20250929" in result
         assert "3 次" in result
         assert "0.0105" in result
+        assert "1,500 tokens" in result
 
     def test_multiple_providers_grouped(self) -> None:
         """多 provider 應各自分組顯示。"""
@@ -86,13 +87,13 @@ class TestFormatCostSummary:
             month_total=0.045,
         )
 
-        assert "Anthropic" in result
-        assert "Google" in result
+        assert "CLAUDE" in result
+        assert "GEMINI" in result
         assert "5 次" in result
         assert "8 次" in result
         # 本月、累計各出現一次 provider header
-        assert result.count("Anthropic") == 2
-        assert result.count("Google") == 2
+        assert result.count("CLAUDE") == 2
+        assert result.count("GEMINI") == 2
 
     def test_month_empty_alltime_has_data(self) -> None:
         """本月無紀錄但累計有資料。"""
@@ -112,11 +113,11 @@ class TestFormatCostSummary:
         )
 
         assert "無紀錄" in result
-        assert "Google" in result
+        assert "GEMINI" in result
         assert "12 次" in result
 
     def test_provider_display_names(self) -> None:
-        """provider 名稱應顯示為友善名稱（Anthropic / Google）。"""
+        """provider 名稱應顯示為友善名稱（CLAUDE / GEMINI）。"""
         summary = FakeUsageSummary(
             provider="anthropic",
             model="claude-opus-4-6",
@@ -133,7 +134,7 @@ class TestFormatCostSummary:
         )
 
         # 不應顯示小寫的原始 provider 名
-        assert "🔹 Anthropic" in result
+        assert "🔹 CLAUDE" in result
 
     def test_mode_summary_sections_displayed(self) -> None:
         """傳入模式摘要時，應顯示本月與累計的模式分組。"""
