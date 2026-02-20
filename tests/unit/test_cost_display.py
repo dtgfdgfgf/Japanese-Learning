@@ -19,6 +19,17 @@ class FakeUsageSummary:
     call_count: int
 
 
+@dataclass
+class FakeModeUsageSummary:
+    """測試用 ModeUsageSummary。"""
+
+    mode: str
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cost_usd: float
+    call_count: int
+
+
 class TestFormatCostSummary:
     """format_cost_summary provider 分組顯示。"""
 
@@ -123,3 +134,52 @@ class TestFormatCostSummary:
 
         # 不應顯示小寫的原始 provider 名
         assert "🔹 Anthropic" in result
+
+    def test_mode_summary_sections_displayed(self) -> None:
+        """傳入模式摘要時，應顯示本月與累計的模式分組。"""
+        summary = FakeUsageSummary(
+            provider="google",
+            model="gemini-3-pro-preview",
+            total_input_tokens=1000,
+            total_output_tokens=300,
+            total_cost_usd=0.0056,
+            call_count=2,
+        )
+        mode_summary = [
+            FakeModeUsageSummary(
+                mode="free",
+                total_input_tokens=1000,
+                total_output_tokens=300,
+                total_cost_usd=0.0056,
+                call_count=2,
+            ),
+            FakeModeUsageSummary(
+                mode="cheap",
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_cost_usd=0.0,
+                call_count=0,
+            ),
+            FakeModeUsageSummary(
+                mode="rigorous",
+                total_input_tokens=0,
+                total_output_tokens=0,
+                total_cost_usd=0.0,
+                call_count=0,
+            ),
+        ]
+
+        result = format_cost_summary(
+            all_time_summary=[summary],
+            month_summary=[summary],
+            all_time_total=0.0056,
+            month_total=0.0056,
+            all_time_mode_summary=mode_summary,
+            month_mode_summary=mode_summary,
+        )
+
+        assert "本月（依模式）" in result
+        assert "累計（依模式）" in result
+        assert "免費" in result
+        assert "便宜" in result
+        assert "嚴謹" in result

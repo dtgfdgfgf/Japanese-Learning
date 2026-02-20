@@ -216,6 +216,9 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "COST_PROVIDER_HEADER": "\n🔹 {provider}",
     "COST_MODEL_LINE": "\n  • {model}: ${cost:.4f} ({count} 次)",
     "COST_TOTAL_LINE": "\n💰 總計：${total:.4f}",
+    "COST_MONTH_MODE_SECTION": "\n\n🧭 本月（依模式）",
+    "COST_ALLTIME_MODE_SECTION": "\n\n🧭 累計（依模式）",
+    "COST_MODE_LINE": "\n  • {mode_label}: ${cost:.4f} ({count} 次)",
 
     # ========== Footer / 模式相關 ==========
     "FOOTER_USAGE": "📊本次：{in_tokens} in + {out_tokens} out ≈ ${cost}｜今日 {pct}%（{used} / {cap}）",
@@ -682,11 +685,27 @@ def _format_provider_grouped(summary_list: list) -> list[str]:
     return lines
 
 
+def _format_mode_grouped(summary_list: list) -> list[str]:
+    """將模式摘要列表格式化。"""
+    lines: list[str] = []
+    for s in summary_list:
+        mode_label = MODE_LABELS.get(s.mode, s.mode)
+        lines.append(Messages.format(
+            "COST_MODE_LINE",
+            mode_label=mode_label,
+            cost=s.total_cost_usd,
+            count=s.call_count,
+        ))
+    return lines
+
+
 def format_cost_summary(
     all_time_summary: list,
     month_summary: list,
     all_time_total: float,
     month_total: float,
+    all_time_mode_summary: list | None = None,
+    month_mode_summary: list | None = None,
 ) -> str:
     """格式化 API 用量摘要訊息（按 provider 分組）。
 
@@ -711,10 +730,16 @@ def format_cost_summary(
         lines.append(Messages.format("COST_TOTAL_LINE", total=month_total))
     else:
         lines.append("\n  (無紀錄)")
+    if month_mode_summary is not None:
+        lines.append(Messages.format("COST_MONTH_MODE_SECTION"))
+        lines.extend(_format_mode_grouped(month_mode_summary))
 
     # 累計摘要
     lines.append(Messages.format("COST_ALLTIME_SECTION"))
     lines.extend(_format_provider_grouped(all_time_summary))
     lines.append(Messages.format("COST_TOTAL_LINE", total=all_time_total))
+    if all_time_mode_summary is not None:
+        lines.append(Messages.format("COST_ALLTIME_MODE_SECTION"))
+        lines.extend(_format_mode_grouped(all_time_mode_summary))
 
     return "".join(lines)
