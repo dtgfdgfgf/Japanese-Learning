@@ -1108,14 +1108,25 @@ async def _handle_unknown(
         await _save_raw_content(line_user_id, raw_text)
         return Messages.format("INPUT_LONG_TEXT_SAVED", length=len(raw_text))
 
+    from src.lib.llm_client import LLMResponse, LLMTrace
     from src.schemas.router import IntentType
     from src.services.router_service import get_router_service
 
     hashed_user_id = hash_user_id(line_user_id)
     router_service = get_router_service()
 
+    # 收集 LLM traces，在 finally 區塊批次寫入 DB
+    llm_traces: list[tuple[LLMTrace, str]] = []
+
+    def _collect_trace(resp: LLMResponse | None, operation: str) -> None:
+        if resp is not None:
+            llm_traces.append((resp.to_trace(), operation))
+
     try:
-        classification = await router_service.classify(raw_text, mode=mode, target_lang=target_lang)
+        classification, classify_resp = await router_service.classify(
+            raw_text, mode=mode, target_lang=target_lang,
+        )
+        _collect_trace(classify_resp, "router_classify")
 
         if classification.intent == IntentType.SAVE and classification.confidence >= 0.8:
             # 判斷是否為短單字（根據語言調整閾值）
@@ -1135,15 +1146,16 @@ async def _handle_unknown(
                     return _format_search_results(db_items)
                 # DB 無紀錄：LLM 解釋 + 詢問入庫
                 try:
-                    explanation = await router_service.get_word_explanation(
+                    word_resp = await router_service.get_word_explanation(
                         word, mode=mode, target_lang=target_lang
                     )
+                    _collect_trace(word_resp, "word_explanation")
                 except Exception:
                     return "API呼叫失敗，請聯絡開發者"
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
                     await user_state_repo.set_pending_save(hashed_user_id, word)
-                return Messages.format("WORD_EXPLANATION", explanation=explanation)
+                return Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
             else:
                 # 偵測多個空格分隔的短單字（例如 "apple banana cherry"）
                 tokens = stripped_text.split()
@@ -1156,24 +1168,28 @@ async def _handle_unknown(
                     # 處理第一個單字，提示其餘逐一輸入
                     first_word = tokens[0]
                     try:
-                        explanation = await router_service.get_word_explanation(
+                        word_resp = await router_service.get_word_explanation(
                             first_word, mode=mode, target_lang=target_lang
                         )
+                        _collect_trace(word_resp, "word_explanation")
                     except Exception:
                         return "API呼叫失敗，請聯絡開發者"
                     async with get_session() as session:
                         user_state_repo = UserStateRepository(session)
                         await user_state_repo.set_pending_save(hashed_user_id, first_word)
                     remaining = "、".join(f"「{t}」" for t in tokens[1:])
-                    base = Messages.format("WORD_EXPLANATION", explanation=explanation)
+                    base = Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
                     return f"{base}\n\n💡 偵測到多個單字，目前處理「{first_word}」。{remaining} 請逐一輸入。"
                 else:
                     # 長文本：直接入庫
                     return await _save_and_hint(line_user_id, raw_text)
 
         if classification.intent == IntentType.CHAT:
-            response = await router_service.get_chat_response(raw_text, mode=mode, target_lang=target_lang)
-            return response
+            chat_resp = await router_service.get_chat_response(
+                raw_text, mode=mode, target_lang=target_lang,
+            )
+            _collect_trace(chat_resp, "chat")
+            return chat_resp.content
 
         if classification.intent == IntentType.HELP:
             from src.templates.messages import MODE_LABELS
@@ -1199,15 +1215,16 @@ async def _handle_unknown(
             keyword = classification.keyword
             if _is_single_word(keyword, target_lang):
                 try:
-                    explanation = await router_service.get_word_explanation(
+                    word_resp = await router_service.get_word_explanation(
                         keyword, mode=mode, target_lang=target_lang
                     )
+                    _collect_trace(word_resp, "word_explanation")
                 except Exception:
                     return "API呼叫失敗，請聯絡開發者"
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
                     await user_state_repo.set_pending_save(hashed_user_id, keyword)
-                return Messages.format("WORD_EXPLANATION", explanation=explanation)
+                return Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
 
             return format_search_no_result(keyword)
 
@@ -1216,6 +1233,23 @@ async def _handle_unknown(
     except Exception as e:
         logger.error(f"Router failed: {e}")
         return Messages.ERROR_GENERIC
+
+    finally:
+        # 批次寫入 LLM traces — 失敗不影響使用者回覆
+        if llm_traces:
+            try:
+                from src.repositories.api_usage_log_repo import ApiUsageLogRepository
+
+                async with get_session() as session:
+                    repo = ApiUsageLogRepository(session)
+                    for trace, operation in llm_traces:
+                        await repo.create_log(
+                            user_id=hashed_user_id,
+                            trace=trace,
+                            operation=operation,
+                        )
+            except Exception:
+                logger.warning("Failed to write LLM traces to DB", exc_info=True)
 
 
 async def _save_raw_content(line_user_id: str, content: str) -> None:

@@ -32,6 +32,16 @@ class LLMResponse:
     latency_ms: int
     raw_response: dict[str, Any] | None = None
 
+    def to_trace(self) -> "LLMTrace":
+        """將 LLMResponse 轉為 LLMTrace（用於 api_usage_logs 記錄）。"""
+        return LLMTrace(
+            model=self.model,
+            provider=self.provider,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            latency_ms=self.latency_ms,
+        )
+
 
 @dataclass
 class LLMTrace:

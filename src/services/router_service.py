@@ -12,7 +12,7 @@ import logging
 
 from pydantic import ValidationError
 
-from src.lib.llm_client import get_llm_client
+from src.lib.llm_client import LLMResponse, get_llm_client
 from src.prompts.router import format_router_request, get_system_prompt
 from src.schemas.router import IntentType, RouterResponse, RouterClassification
 from src.templates.messages import Messages
@@ -38,35 +38,37 @@ class RouterService:
         context: str | None = None,
         mode: str = "free",
         target_lang: str = "ja",
-    ) -> RouterResponse:
+    ) -> tuple[RouterResponse, LLMResponse | None]:
         """Classify user message intent.
 
         Args:
             message: User's message
             context: Optional conversation context
             mode: LLM mode (cheap/balanced/rigorous)
+            target_lang: 目標語言 (ja/en)
 
         Returns:
-            RouterResponse with classified intent
+            (RouterResponse, LLMResponse | None) — LLM 失敗時第二元素為 None
         """
         try:
             user_prompt = format_router_request(message, context)
             system_prompt = get_system_prompt(lang=target_lang)
 
-            response = await self.llm_client.complete_with_mode(
+            llm_response = await self.llm_client.complete_with_mode(
                 mode=mode,
                 system_prompt=system_prompt,
                 user_message=user_prompt,
                 temperature=0.3,
             )
-            response_text = response.content
-            
+            response_text = llm_response.content
+
             # 解析回應
-            return self._parse_llm_response(response_text, message, target_lang=target_lang)
-            
+            parsed = self._parse_llm_response(response_text, message, target_lang=target_lang)
+            return parsed, llm_response
+
         except Exception as e:
             logger.error(f"Router classification failed, using heuristic: {e}")
-            return self._heuristic_classify(message, target_lang=target_lang)
+            return self._heuristic_classify(message, target_lang=target_lang), None
     
     def _parse_llm_response(
         self,
@@ -224,7 +226,7 @@ class RouterService:
         context: str | None = None,
         mode: str = "free",
         target_lang: str = "ja",
-    ) -> str:
+    ) -> LLMResponse:
         """Generate a chat response for learning questions.
 
         Args:
@@ -234,7 +236,7 @@ class RouterService:
             target_lang: 目標語言 (ja/en)
 
         Returns:
-            Generated response
+            LLMResponse（失敗時 raise，由呼叫端 try/except 處理）
         """
         lang_name = {"ja": "日語", "en": "英語"}.get(target_lang, "日語")
         system_prompt = f"""你是一個友善的{lang_name}學習助手。
@@ -247,26 +249,21 @@ class RouterService:
 - 舉例說明
 - 鼓勵學習"""
 
-        try:
-            response = await self.llm_client.complete_with_mode(
-                mode=mode,
-                system_prompt=system_prompt,
-                user_message=message,
-                temperature=0.7,
-            )
-            
-            return response.content
+        response = await self.llm_client.complete_with_mode(
+            mode=mode,
+            system_prompt=system_prompt,
+            user_message=message,
+            temperature=0.7,
+        )
 
-        except Exception as e:
-            logger.error(f"Chat response generation failed: {e}")
-            return Messages.ERROR_CHAT
+        return response
 
     async def get_word_explanation(
         self,
         word: str,
         mode: str = "free",
         target_lang: str = "ja",
-    ) -> str:
+    ) -> LLMResponse:
         """取得單字解釋。
 
         Args:
@@ -275,7 +272,7 @@ class RouterService:
             target_lang: 目標語言 (ja/en)
 
         Returns:
-            單字解釋
+            LLMResponse（失敗時 raise，由呼叫端 try/except 處理）
         """
         if target_lang == "ja":
             system_prompt = """你是一個專業的日語老師。請用繁體中文簡短解釋這個日文單字的意思。
@@ -304,7 +301,7 @@ class RouterService:
                 temperature=0.3,
             )
 
-            return response.content
+            return response
 
         except Exception as e:
             logger.error(f"Word explanation generation failed: {e}")

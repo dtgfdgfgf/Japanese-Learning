@@ -139,6 +139,7 @@ class ApiUsageLogRepository(BaseRepository[ApiUsageLog]):
                 func.count(ApiUsageLog.log_id).label("call_count"),
             )
             .where(ApiUsageLog.user_id == user_id)
+            .where(ApiUsageLog.is_deleted.is_(False))
             .group_by(ApiUsageLog.provider, ApiUsageLog.model)
             .order_by(func.sum(ApiUsageLog.cost_usd).desc())
         )
@@ -175,8 +176,10 @@ class ApiUsageLogRepository(BaseRepository[ApiUsageLog]):
         Returns:
             總費用 (美元)
         """
-        stmt = select(func.sum(ApiUsageLog.cost_usd)).where(
-            ApiUsageLog.user_id == user_id
+        stmt = (
+            select(func.sum(ApiUsageLog.cost_usd))
+            .where(ApiUsageLog.user_id == user_id)
+            .where(ApiUsageLog.is_deleted.is_(False))
         )
 
         if since:

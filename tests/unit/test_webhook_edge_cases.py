@@ -666,7 +666,7 @@ class TestCase26LongTextDirectSave:
         mock_classification.intent = IntentType.UNKNOWN
 
         mock_router = MagicMock()
-        mock_router.classify = AsyncMock(return_value=mock_classification)
+        mock_router.classify = AsyncMock(return_value=(mock_classification, None))
         mock_router_svc.return_value = mock_router
 
         with (

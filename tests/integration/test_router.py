@@ -59,11 +59,11 @@ class TestRouterFlowIntegration:
             mock_line.return_value = mock_client
             
             with patch("src.services.router_service.RouterService.classify") as mock_classify:
-                mock_classify.return_value = RouterResponse(
+                mock_classify.return_value = (RouterResponse(
                     intent=IntentType.SAVE,
                     confidence=0.85,
                     reason="Japanese content"
-                )
+                ), None)
                 
                 with patch("src.api.webhook.get_session") as mock_session_ctx:
                     mock_session = AsyncMock()
@@ -113,14 +113,17 @@ class TestRouterFlowIntegration:
             mock_line.return_value = mock_client
             
             with patch("src.services.router_service.RouterService.classify") as mock_classify:
-                mock_classify.return_value = RouterResponse(
+                mock_classify.return_value = (RouterResponse(
                     intent=IntentType.CHAT,
                     confidence=0.7,
                     reason="Learning question"
-                )
-                
+                ), None)
+
                 with patch("src.services.router_service.RouterService.get_chat_response") as mock_chat:
-                    mock_chat.return_value = "這個文法表示..."
+                    mock_chat_resp = MagicMock()
+                    mock_chat_resp.content = "這個文法表示..."
+                    mock_chat_resp.to_trace.return_value = MagicMock()
+                    mock_chat.return_value = mock_chat_resp
                     
                     transport = ASGITransport(app=app)
                     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -161,12 +164,12 @@ class TestRouterFlowIntegration:
             mock_line.return_value = mock_client
             
             with patch("src.services.router_service.RouterService.classify") as mock_classify:
-                mock_classify.return_value = RouterResponse(
+                mock_classify.return_value = (RouterResponse(
                     intent=IntentType.SEARCH,
                     confidence=0.8,
                     keyword="考える",
                     reason="Search request"
-                )
+                ), None)
                 
                 with patch("src.api.webhook.get_session") as mock_session_ctx:
                     mock_session = AsyncMock()
@@ -214,11 +217,11 @@ class TestRouterFlowIntegration:
             mock_line.return_value = mock_client
             
             with patch("src.services.router_service.RouterService.classify") as mock_classify:
-                mock_classify.return_value = RouterResponse(
+                mock_classify.return_value = (RouterResponse(
                     intent=IntentType.UNKNOWN,
                     confidence=0.3,
                     reason="Cannot determine"
-                )
+                ), None)
                 
                 transport = ASGITransport(app=app)
                 async with AsyncClient(transport=transport, base_url="http://test") as client:

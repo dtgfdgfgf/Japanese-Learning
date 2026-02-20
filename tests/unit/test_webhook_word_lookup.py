@@ -77,8 +77,9 @@ class TestSaveIntentShortWordDbHit:
 
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
-            return_value=RouterResponse(
-                intent=IntentType.SAVE, confidence=0.9, reason="single word"
+            return_value=(
+                RouterResponse(intent=IntentType.SAVE, confidence=0.9, reason="single word"),
+                None,
             )
         )
         mock_get_router.return_value = mock_router
@@ -108,8 +109,9 @@ class TestSaveIntentShortWordDbHit:
 
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
-            return_value=RouterResponse(
-                intent=IntentType.SAVE, confidence=0.9, reason="single word"
+            return_value=(
+                RouterResponse(intent=IntentType.SAVE, confidence=0.9, reason="single word"),
+                None,
             )
         )
         mock_get_router.return_value = mock_router
@@ -152,13 +154,18 @@ class TestSaveIntentShortWordDbMiss:
         """DB 無結果時呼叫 LLM 解釋並設定 pending_save。"""
         from src.schemas.router import IntentType, RouterResponse
 
+        mock_word_resp = MagicMock()
+        mock_word_resp.content = "FIT 的意思是..."
+        mock_word_resp.to_trace.return_value = MagicMock()
+
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
-            return_value=RouterResponse(
-                intent=IntentType.SAVE, confidence=0.9, reason="single word"
+            return_value=(
+                RouterResponse(intent=IntentType.SAVE, confidence=0.9, reason="single word"),
+                None,
             )
         )
-        mock_router.get_word_explanation = AsyncMock(return_value="FIT 的意思是...")
+        mock_router.get_word_explanation = AsyncMock(return_value=mock_word_resp)
         mock_get_router.return_value = mock_router
 
         # DB 無結果
@@ -212,16 +219,23 @@ class TestSearchIntentSingleWordDbMiss:
         """SEARCH intent DB 無結果且 keyword 為單字 → LLM 解釋。"""
         from src.schemas.router import IntentType, RouterResponse
 
+        mock_word_resp = MagicMock()
+        mock_word_resp.content = "FIT 表示適合"
+        mock_word_resp.to_trace.return_value = MagicMock()
+
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
-            return_value=RouterResponse(
-                intent=IntentType.SEARCH,
-                confidence=0.85,
-                keyword="FIT",
-                reason="search intent",
+            return_value=(
+                RouterResponse(
+                    intent=IntentType.SEARCH,
+                    confidence=0.85,
+                    keyword="FIT",
+                    reason="search intent",
+                ),
+                None,
             )
         )
-        mock_router.get_word_explanation = AsyncMock(return_value="FIT 表示適合")
+        mock_router.get_word_explanation = AsyncMock(return_value=mock_word_resp)
         mock_get_router.return_value = mock_router
 
         # DB 無結果
@@ -267,11 +281,14 @@ class TestSearchIntentMultiWordDbMiss:
 
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
-            return_value=RouterResponse(
-                intent=IntentType.SEARCH,
-                confidence=0.8,
-                keyword="red apple",
-                reason="search intent",
+            return_value=(
+                RouterResponse(
+                    intent=IntentType.SEARCH,
+                    confidence=0.8,
+                    keyword="red apple",
+                    reason="search intent",
+                ),
+                None,
             )
         )
         mock_get_router.return_value = mock_router
@@ -305,11 +322,14 @@ class TestSearchIntentDbHit:
 
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
-            return_value=RouterResponse(
-                intent=IntentType.SEARCH,
-                confidence=0.85,
-                keyword="食べる",
-                reason="search intent",
+            return_value=(
+                RouterResponse(
+                    intent=IntentType.SEARCH,
+                    confidence=0.85,
+                    keyword="食べる",
+                    reason="search intent",
+                ),
+                None,
             )
         )
         mock_get_router.return_value = mock_router
@@ -357,8 +377,9 @@ class TestWordExplanationApiFailure:
 
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
-            return_value=RouterResponse(
-                intent=IntentType.SAVE, confidence=0.9, reason="single word"
+            return_value=(
+                RouterResponse(intent=IntentType.SAVE, confidence=0.9, reason="single word"),
+                None,
             )
         )
         mock_router.get_word_explanation = AsyncMock(
@@ -401,11 +422,14 @@ class TestWordExplanationApiFailure:
 
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
-            return_value=RouterResponse(
-                intent=IntentType.SEARCH,
-                confidence=0.85,
-                keyword="spell",
-                reason="search intent",
+            return_value=(
+                RouterResponse(
+                    intent=IntentType.SEARCH,
+                    confidence=0.85,
+                    keyword="spell",
+                    reason="search intent",
+                ),
+                None,
             )
         )
         mock_router.get_word_explanation = AsyncMock(

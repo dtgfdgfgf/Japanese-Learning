@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from src.lib.llm_client import LLMResponse
 from src.schemas.router import IntentType
 from src.services.router_service import RouterService
 
@@ -51,15 +52,16 @@ class TestRouterService:
             "confidence": 0.85,
             "reason": "Contains Japanese learning content"
         })
-        
+
         router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
-        
-        result = await router_service.classify("今日は天気がいいですね。")
-        
+
+        result, llm_resp = await router_service.classify("今日は天気がいいですね。")
+
         assert result.intent == IntentType.SAVE
         assert result.confidence >= 0.8
+        assert llm_resp is not None
     
     @pytest.mark.asyncio
     async def test_classify_practice_intent(self, router_service):
@@ -69,15 +71,16 @@ class TestRouterService:
             "confidence": 0.9,
             "reason": "User wants to practice"
         })
-        
+
         router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
-        
-        result = await router_service.classify("我要練習")
-        
+
+        result, llm_resp = await router_service.classify("我要練習")
+
         assert result.intent == IntentType.PRACTICE
         assert result.confidence >= 0.7
+        assert llm_resp is not None
     
     @pytest.mark.asyncio
     async def test_classify_search_with_keyword(self, router_service):
@@ -88,15 +91,16 @@ class TestRouterService:
             "keyword": "考える",
             "reason": "User searching for a word"
         })
-        
+
         router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
-        
-        result = await router_service.classify("找一下「考える」")
-        
+
+        result, llm_resp = await router_service.classify("找一下「考える」")
+
         assert result.intent == IntentType.SEARCH
         assert result.keyword == "考える"
+        assert llm_resp is not None
     
     @pytest.mark.asyncio
     async def test_classify_chat_intent(self, router_service):
@@ -106,14 +110,15 @@ class TestRouterService:
             "confidence": 0.7,
             "reason": "User asking a learning question"
         })
-        
+
         router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
-        
-        result = await router_service.classify("這個文法怎麼用？")
-        
+
+        result, llm_resp = await router_service.classify("這個文法怎麼用？")
+
         assert result.intent == IntentType.CHAT
+        assert llm_resp is not None
     
     @pytest.mark.asyncio
     async def test_low_confidence_triggers_fallback(self, router_service):
@@ -123,14 +128,15 @@ class TestRouterService:
             "confidence": 0.3,
             "reason": "Cannot determine intent"
         })
-        
+
         router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock(mock_content)
         )
-        
-        result = await router_service.classify("ok")
-        
+
+        result, llm_resp = await router_service.classify("ok")
+
         assert result.needs_fallback is True
+        assert llm_resp is not None
     
     @pytest.mark.asyncio
     async def test_llm_error_falls_back_to_heuristic(self, router_service):
@@ -139,11 +145,12 @@ class TestRouterService:
             side_effect=Exception("LLM Error")
         )
 
-        result = await router_service.classify("test message")
+        result, llm_resp = await router_service.classify("test message")
 
         # heuristic 對短文本回傳 UNKNOWN，但 confidence > 0（非硬 0.0）
         assert result.intent == IntentType.UNKNOWN
         assert result.confidence > 0.0
+        assert llm_resp is None
     
     @pytest.mark.asyncio
     async def test_invalid_json_uses_heuristic(self, router_service):
@@ -151,11 +158,12 @@ class TestRouterService:
         router_service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock("This is not JSON")
         )
-        
-        result = await router_service.classify("今日は天気がいい")
-        
-        # Heuristic should detect Japanese content
+
+        result, llm_resp = await router_service.classify("今日は天気がいい")
+
+        # Heuristic should detect Japanese content, but LLM was still called
         assert result.intent in [IntentType.SAVE, IntentType.UNKNOWN]
+        assert llm_resp is not None
 
 
 class TestHeuristicClassification:
@@ -339,31 +347,30 @@ class TestJsonExtraction:
 
 class TestChatResponse:
     """Tests for chat response generation."""
-    
+
     @pytest.mark.asyncio
     async def test_chat_response_generated(self):
-        """Test that chat responses are generated."""
+        """Test that chat responses are generated as LLMResponse."""
         service = RouterService()
         service.llm_client = MagicMock()
         service.llm_client.complete_with_mode = AsyncMock(
             return_value=_create_llm_response_mock("這個文法表示完成或遺憾的語氣。")
         )
-        
+
         response = await service.get_chat_response("這個文法怎麼用？")
-        
-        assert response
-        assert len(response) > 0
-    
+
+        assert response.content
+        assert len(response.content) > 0
+
     @pytest.mark.asyncio
-    async def test_chat_response_error_handling(self):
-        """Test chat response error handling."""
+    async def test_chat_response_error_raises(self):
+        """Test chat response raises on error (caller handles it)."""
         service = RouterService()
         service.llm_client = MagicMock()
         service.llm_client.complete_with_mode = AsyncMock(side_effect=Exception("Error"))
 
-        response = await service.get_chat_response("test")
-
-        assert "抱歉" in response or "無法" in response
+        with pytest.raises(Exception, match="Error"):
+            await service.get_chat_response("test")
 
 
 class TestWordExplanation:
@@ -371,7 +378,7 @@ class TestWordExplanation:
 
     @pytest.mark.asyncio
     async def test_japanese_word_explanation(self):
-        """日文單字解釋正常回傳。"""
+        """日文單字解釋回傳 LLMResponse。"""
         service = RouterService()
         service.llm_client = MagicMock()
         service.llm_client.complete_with_mode = AsyncMock(
@@ -382,15 +389,15 @@ class TestWordExplanation:
 
         response = await service.get_word_explanation("食べる", target_lang="ja")
 
-        assert response
-        assert len(response) > 0
+        assert response.content
+        assert len(response.content) > 0
         # 確認 LLM 被呼叫且未設定 max_tokens（不限制輸出長度）
         call_kwargs = service.llm_client.complete_with_mode.call_args.kwargs
         assert "max_tokens" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_english_word_explanation(self):
-        """英文單字解釋正常回傳。"""
+        """英文單字解釋回傳 LLMResponse。"""
         service = RouterService()
         service.llm_client = MagicMock()
         service.llm_client.complete_with_mode = AsyncMock(
@@ -401,8 +408,8 @@ class TestWordExplanation:
 
         response = await service.get_word_explanation("transcendent", target_lang="en")
 
-        assert response
-        assert len(response) > 0
+        assert response.content
+        assert len(response.content) > 0
 
     @pytest.mark.asyncio
     async def test_word_explanation_error_raises(self):
@@ -425,7 +432,8 @@ class TestWordExplanation:
             return_value=_create_llm_response_mock("解釋內容")
         )
 
-        await service.get_word_explanation("word", mode="rigorous", target_lang="ja")
+        response = await service.get_word_explanation("word", mode="rigorous", target_lang="ja")
 
+        assert response.content == "解釋內容"
         call_kwargs = service.llm_client.complete_with_mode.call_args.kwargs
         assert call_kwargs.get("mode") == "rigorous"

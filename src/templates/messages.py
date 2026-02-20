@@ -209,7 +209,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "COST_SUMMARY_HEADER": "📊 API 用量統計",
     "COST_MONTH_SECTION": "\n\n📅 本月",
     "COST_ALLTIME_SECTION": "\n\n📈 累計",
-    "COST_MODEL_LINE": "\n• {model}: ${cost:.4f}",
+    "COST_PROVIDER_HEADER": "\n🔹 {provider}",
+    "COST_MODEL_LINE": "\n  • {model}: ${cost:.4f} ({count} 次)",
     "COST_TOTAL_LINE": "\n💰 總計：${total:.4f}",
 
     # ========== Footer / 模式相關 ==========
@@ -616,13 +617,41 @@ def format_stats_summary(
     )
 
 
+_PROVIDER_DISPLAY_NAMES: dict[str, str] = {
+    "anthropic": "Anthropic",
+    "google": "Google",
+}
+
+
+def _format_provider_grouped(summary_list: list) -> list[str]:
+    """將 UsageSummary 列表按 provider 分組格式化。"""
+    from collections import defaultdict
+
+    grouped: dict[str, list] = defaultdict(list)
+    for s in summary_list:
+        grouped[s.provider].append(s)
+
+    lines: list[str] = []
+    for provider in sorted(grouped.keys()):
+        display_name = _PROVIDER_DISPLAY_NAMES.get(provider, provider)
+        lines.append(Messages.format("COST_PROVIDER_HEADER", provider=display_name))
+        for s in grouped[provider]:
+            lines.append(Messages.format(
+                "COST_MODEL_LINE",
+                model=s.model,
+                cost=s.total_cost_usd,
+                count=s.call_count,
+            ))
+    return lines
+
+
 def format_cost_summary(
     all_time_summary: list,
     month_summary: list,
     all_time_total: float,
     month_total: float,
 ) -> str:
-    """格式化 API 用量摘要訊息。
+    """格式化 API 用量摘要訊息（按 provider 分組）。
 
     Args:
         all_time_summary: 累計用量摘要列表 (UsageSummary)
@@ -639,19 +668,16 @@ def format_cost_summary(
     lines = [Messages.format("COST_SUMMARY_HEADER")]
 
     # 本月摘要
+    lines.append(Messages.format("COST_MONTH_SECTION"))
     if month_summary:
-        lines.append(Messages.format("COST_MONTH_SECTION"))
-        for s in month_summary:
-            lines.append(Messages.format("COST_MODEL_LINE", model=s.model, cost=s.total_cost_usd))
+        lines.extend(_format_provider_grouped(month_summary))
         lines.append(Messages.format("COST_TOTAL_LINE", total=month_total))
     else:
-        lines.append(Messages.format("COST_MONTH_SECTION"))
-        lines.append("\n• (無紀錄)")
+        lines.append("\n  (無紀錄)")
 
     # 累計摘要
     lines.append(Messages.format("COST_ALLTIME_SECTION"))
-    for s in all_time_summary:
-        lines.append(Messages.format("COST_MODEL_LINE", model=s.model, cost=s.total_cost_usd))
+    lines.extend(_format_provider_grouped(all_time_summary))
     lines.append(Messages.format("COST_TOTAL_LINE", total=all_time_total))
 
     return "".join(lines)
