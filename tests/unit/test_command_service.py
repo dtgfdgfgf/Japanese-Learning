@@ -247,3 +247,30 @@ class TestWordSaveCommand:
         """純「save」不匹配 WORD_SAVE（.+ 需至少一字元 + 空格）。"""
         result = parse_command("save")
         assert result.command_type == CommandType.UNKNOWN
+
+
+class TestListItemsCommand:
+    """Tests for LIST_ITEMS command parsing（「清單」列出所有項目）。"""
+
+    def test_list_all(self):
+        """「清單」→ LIST_ITEMS，無篩選。"""
+        result = parse_command("清單")
+        assert result.command_type == CommandType.LIST_ITEMS
+        assert result.keyword is None
+
+    def test_list_vocab(self):
+        """「單字清單」→ LIST_ITEMS，keyword=單字。"""
+        result = parse_command("單字清單")
+        assert result.command_type == CommandType.LIST_ITEMS
+        assert result.keyword == "單字"
+
+    def test_list_grammar(self):
+        """「文法清單」→ LIST_ITEMS，keyword=文法。"""
+        result = parse_command("文法清單")
+        assert result.command_type == CommandType.LIST_ITEMS
+        assert result.keyword == "文法"
+
+    def test_list_partial_not_matched(self):
+        """「我的清單」不匹配 LIST_ITEMS。"""
+        result = parse_command("我的清單")
+        assert result.command_type == CommandType.UNKNOWN

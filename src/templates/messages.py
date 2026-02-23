@@ -148,6 +148,13 @@ _MESSAGES_ZH_TW: dict[str, str] = {
         "• {practice_logs} 筆練習紀錄"
     ),
     
+    # ========== 清單相關 ==========
+    "LIST_ITEMS_EMPTY": "📭 尚無項目\n\n請先入庫一些學習素材，再輸入「清單」查看",
+    "LIST_ITEMS_HEADER": "📚 學習項目清單（共 {total} 項）",
+    "LIST_ITEMS_VOCAB_HEADER": "\n\n【單字】({count} 項)",
+    "LIST_ITEMS_GRAMMAR_HEADER": "\n\n【文法】({count} 項)",
+    "ERROR_LIST_ITEMS": "查詢清單時發生錯誤，請稍後再試",
+
     # ========== 導引訊息 ==========
     "DELETE_HINT_USAGE": (
         "如需刪除資料，請使用以下指令：\n"
@@ -168,6 +175,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 • 練習 - 開始練習題
 • 結束練習（或 停止練習）- 中途結束練習
 • 查詢 <關鍵字> - 搜尋已入庫的內容
+• 清單 - 列出所有已入庫的單字和文法（可用「單字清單」或「文法清單」篩選）
 • 統計（或 進度）- 查看學習進度
 • 用量（或 cost）- 查看 API 使用量與費用
 • 英文 / 日文 - 切換學習語言
@@ -318,6 +326,10 @@ class Messages:
     DELETE_CONFIRM_PROMPT: str = _MESSAGES_ZH_TW["DELETE_CONFIRM_PROMPT"]
     DELETE_CONFIRM_NOT_PENDING: str = _MESSAGES_ZH_TW["DELETE_CONFIRM_NOT_PENDING"]
     
+    # 清單
+    LIST_ITEMS_EMPTY: str = _MESSAGES_ZH_TW["LIST_ITEMS_EMPTY"]
+    ERROR_LIST_ITEMS: str = _MESSAGES_ZH_TW["ERROR_LIST_ITEMS"]
+
     # 導引
     FALLBACK_UNKNOWN: str = _MESSAGES_ZH_TW["FALLBACK_UNKNOWN"]
     

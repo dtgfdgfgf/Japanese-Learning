@@ -79,6 +79,7 @@ PENDING_SAFE_COMMANDS = {
     CommandType.PRIVACY,
     CommandType.EXIT_PRACTICE,
     CommandType.WORD_SAVE,
+    CommandType.LIST_ITEMS,
 }
 
 
@@ -719,6 +720,9 @@ async def _dispatch_command(
     if command_type == CommandType.STATS:
         return await _handle_stats(line_user_id)
 
+    if command_type == CommandType.LIST_ITEMS:
+        return await _handle_list_items(line_user_id, command.keyword)
+
     if command_type == CommandType.DELETE_CONFIRM:
         return await _handle_delete_confirm(line_user_id)
 
@@ -981,6 +985,77 @@ async def _handle_stats(line_user_id: str) -> str:
         except Exception as e:
             logger.error(f"Stats query failed: {e}")
             return Messages.ERROR_STATS
+
+
+async def _handle_list_items(line_user_id: str, keyword: str | None) -> str:
+    """處理清單指令，列出使用者所有項目。"""
+    hashed_user_id = hash_user_id(line_user_id)
+
+    # 判斷篩選類型
+    type_filter: str | None = None
+    if keyword == "單字":
+        type_filter = "vocab"
+    elif keyword == "文法":
+        type_filter = "grammar"
+
+    async with get_session() as session:
+        from src.repositories.item_repo import ItemRepository
+
+        item_repo = ItemRepository(session)
+
+        try:
+            items = await item_repo.get_by_user(
+                user_id=hashed_user_id,
+                item_type=type_filter,
+                limit=10000,
+            )
+
+            if not items:
+                return Messages.LIST_ITEMS_EMPTY
+
+            return _format_list_items(items, type_filter)
+
+        except Exception as e:
+            logger.error(f"List items failed: {e}")
+            return Messages.ERROR_LIST_ITEMS
+
+
+def _format_list_items(items: "Sequence[Item]", type_filter: str | None) -> str:
+    """格式化項目清單為使用者友善的訊息。"""
+    vocab_items = [i for i in items if i.item_type == "vocab"]
+    grammar_items = [i for i in items if i.item_type == "grammar"]
+    total = len(items)
+
+    lines = [Messages.format("LIST_ITEMS_HEADER", total=total)]
+
+    # 單字區塊
+    if vocab_items and type_filter != "grammar":
+        lines.append(Messages.format("LIST_ITEMS_VOCAB_HEADER", count=len(vocab_items)))
+        for i, item in enumerate(vocab_items, 1):
+            payload = item.payload or {}
+            surface = payload.get("surface", "")
+            reading = payload.get("reading", "")
+            pronunciation = payload.get("pronunciation", "")
+            glossary = payload.get("glossary_zh", [])
+            meaning = glossary[0] if glossary else ""
+
+            if reading and reading != surface:
+                lines.append(f"{i}. {surface}【{reading}】- {meaning}")
+            elif pronunciation:
+                lines.append(f"{i}. {surface} ({pronunciation}) - {meaning}")
+            else:
+                lines.append(f"{i}. {surface} - {meaning}")
+
+    # 文法區塊
+    if grammar_items and type_filter != "vocab":
+        lines.append(Messages.format("LIST_ITEMS_GRAMMAR_HEADER", count=len(grammar_items)))
+        for i, item in enumerate(grammar_items, 1):
+            payload = item.payload or {}
+            pattern = payload.get("pattern", "")
+            meaning = payload.get("meaning_zh", "")
+            lines.append(f"{i}. {pattern} - {meaning}")
+
+    return "\n".join(lines)
 
 
 async def _handle_practice_answer(hashed_user_id: str, answer_text: str, mode: str = "free", target_lang: str = "ja") -> str:
