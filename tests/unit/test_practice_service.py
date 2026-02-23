@@ -139,7 +139,7 @@ class TestPracticeSession:
         assert session.correct_count == 3
     
     def test_format_questions_message(self):
-        """Test formatting questions as message."""
+        """Test formatting questions message — 逐題顯示，開頭告知總題數。"""
         questions = [
             PracticeQuestion(
                 question_id="q1",
@@ -158,18 +158,20 @@ class TestPracticeSession:
                 item_key="vocab:食べる",
             ),
         ]
-        
+
         session = PracticeSession(
             session_id="s1",
             user_id="user1",
             questions=questions,
         )
-        
+
         message = session.format_questions_message()
-        
+
         assert "練習" in message
+        assert "共 2 題" in message
         assert "1." in message
-        assert "2." in message
+        # 只顯示第一題，不顯示第二題
+        assert "2." not in message
     
     def test_format_result_message_perfect(self):
         """Test result message for perfect score."""

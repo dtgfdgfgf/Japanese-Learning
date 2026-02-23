@@ -99,8 +99,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "PRACTICE_NO_ACTIVE_SESSION": "沒有進行中的練習，請先輸入「練習」開始",
     "PRACTICE_EXIT": "已結束練習 📝\n可隨時輸入「練習」重新開始。",
     "PRACTICE_EXIT_NO_SESSION": "目前沒有進行中的練習。",
-    "PRACTICE_HEADER": "📝 今日練習題：\n",
-    "PRACTICE_FOOTER": "\n請依序回答，輸入答案即可 ✍️",
+    "PRACTICE_HEADER": "📝 今日練習（共 {total} 題）\n\n第 1 題：\n",
+    "PRACTICE_FOOTER": "",
     "PRACTICE_ANSWER_CORRECT": "✅ 正確！",
     "PRACTICE_ANSWER_WRONG": "❌ 答案是：{expected}",
     "PRACTICE_NEXT_QUESTION": "\n\n下一題：\n{question}",
@@ -310,8 +310,6 @@ class Messages:
     # 練習
     PRACTICE_GENERATE_FAILED: str = _MESSAGES_ZH_TW["PRACTICE_GENERATE_FAILED"]
     PRACTICE_NO_ACTIVE_SESSION: str = _MESSAGES_ZH_TW["PRACTICE_NO_ACTIVE_SESSION"]
-    PRACTICE_HEADER: str = _MESSAGES_ZH_TW["PRACTICE_HEADER"]
-    PRACTICE_FOOTER: str = _MESSAGES_ZH_TW["PRACTICE_FOOTER"]
     PRACTICE_ANSWER_CORRECT: str = _MESSAGES_ZH_TW["PRACTICE_ANSWER_CORRECT"]
     
     # 刪除

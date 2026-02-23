@@ -122,19 +122,17 @@ class PracticeSession(BaseModel):
         return len(self.answers)
     
     def format_questions_message(self) -> str:
-        """Format all questions as LINE message.
-        
+        """格式化練習開始訊息：顯示總題數 + 第一題。
+
         Returns:
-            Formatted string with all questions
+            Formatted string with total count and first question
         """
         # 延遲引入以避免循環引用
         from src.templates.messages import Messages
-        
-        lines = [Messages.PRACTICE_HEADER]
-        for i, q in enumerate(self.questions, 1):
-            lines.append(q.format_for_display(i))
-        lines.append(Messages.PRACTICE_FOOTER)
-        return "".join(lines)
+
+        header = Messages.format("PRACTICE_HEADER", total=self.total_questions)
+        first_q = self.questions[0].format_for_display(1) if self.questions else ""
+        return header + first_q
     
     def format_result_message(self) -> str:
         """Format practice results as LINE message.

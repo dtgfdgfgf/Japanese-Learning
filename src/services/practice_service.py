@@ -510,7 +510,9 @@ class PracticeService:
             await self.session_service.update_session(user_id, practice_session)
             next_q = practice_session.current_question
             if next_q:
-                feedback += f"\n\n下一題：\n{next_q.format_for_display(practice_session.current_index + 1)}"
+                q_num = practice_session.current_index + 1
+                total = practice_session.total_questions
+                feedback += f"\n\n第 {q_num}/{total} 題：\n{next_q.format_for_display(q_num)}"
 
         return practice_answer, feedback
 
