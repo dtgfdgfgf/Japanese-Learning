@@ -586,3 +586,212 @@ class TestEnglishPracticeQuestions:
 
             assert question is not None
             assert any("發音" in h for h in question.hints)
+
+
+class TestAcceptedAnswers:
+    """Tests for accepted_answers population in question generation."""
+
+    def test_vocab_meaning_accepted_answers_includes_all_glossary(self):
+        """VOCAB_MEANING 的 accepted_answers 應包含所有 glossary_zh 項目。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "vocab"
+        mock_item.key = "vocab:考える"
+        mock_item.payload = {
+            "surface": "考える",
+            "reading": "かんがえる",
+            "glossary_zh": ["思考", "考慮", "想"],
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
+            question = service._generate_vocab_meaning_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is not None
+            assert question.expected_answer == "思考"
+            assert "思考" in question.accepted_answers
+            assert "考慮" in question.accepted_answers
+            assert "想" in question.accepted_answers
+
+    def test_vocab_recall_accepted_answers_includes_reading_variants(self):
+        """VOCAB_RECALL 的 accepted_answers 應包含漢字與讀音變體。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "vocab"
+        mock_item.key = "vocab:考える"
+        mock_item.payload = {
+            "surface": "考える",
+            "reading": "かんがえる",
+            "glossary_zh": ["思考"],
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.target_lang = "ja"
+            question = service._generate_vocab_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is not None
+            assert "考える" in question.accepted_answers
+            assert "かんがえる" in question.accepted_answers
+            # 片假名變體也應包含
+            assert "カンガエル" in question.accepted_answers
+
+    def test_vocab_recall_english_no_reading_variants(self):
+        """英文模式 VOCAB_RECALL 的 accepted_answers 僅包含 surface。"""
+        from src.services.practice_service import PracticeService
+
+        mock_item = MagicMock()
+        mock_item.item_id = str(uuid.uuid4())
+        mock_item.item_type = "vocab"
+        mock_item.key = "vocab:consider"
+        mock_item.payload = {
+            "surface": "consider",
+            "pronunciation": "/kənˈsɪdər/",
+            "glossary_zh": ["考慮"],
+        }
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.target_lang = "en"
+            question = service._generate_vocab_question(
+                "q1", mock_item, mock_item.payload
+            )
+
+            assert question is not None
+            assert question.accepted_answers == ["consider"]
+
+    def test_backward_compat_empty_accepted_answers(self):
+        """accepted_answers 為空時 fallback 到 expected_answer。"""
+        q = PracticeQuestion(
+            question_id="q1",
+            item_id="item1",
+            practice_type=PracticeType.VOCAB_MEANING,
+            prompt="考える",
+            expected_answer="思考",
+            item_key="vocab:考える",
+        )
+
+        # accepted_answers 預設為空 list
+        assert q.accepted_answers == []
+        # expected_answer 仍可用
+        assert q.expected_answer == "思考"
+
+
+class TestLLMGradingFallback:
+    """Tests for LLM semantic grading fallback (Phase 2)."""
+
+    @pytest.mark.asyncio
+    async def test_llm_fallback_correct_synonym(self):
+        """Phase 1 失敗 → Phase 2 LLM 判定正確。"""
+        from src.services.practice_service import PracticeService
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.mode = "free"
+            service.llm_client = MagicMock()
+            service.llm_client.complete_json_with_mode = AsyncMock(
+                return_value=({"is_correct": True, "reason": "同義詞"}, MagicMock())
+            )
+
+            result = await service._llm_grade_answer(
+                user_answer="測驗",
+                expected_answer="測試",
+                accepted_answers=["測試"],
+                question_context="test 是什麼意思？",
+            )
+
+            assert result is True
+            service.llm_client.complete_json_with_mode.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_llm_fallback_incorrect(self):
+        """Phase 2 LLM 判定錯誤。"""
+        from src.services.practice_service import PracticeService
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.mode = "free"
+            service.llm_client = MagicMock()
+            service.llm_client.complete_json_with_mode = AsyncMock(
+                return_value=({"is_correct": False, "reason": "意思不同"}, MagicMock())
+            )
+
+            result = await service._llm_grade_answer(
+                user_answer="蘋果",
+                expected_answer="測試",
+                accepted_answers=["測試"],
+                question_context="test 是什麼意思？",
+            )
+
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_graceful_fallback(self):
+        """LLM 呼叫失敗時 graceful return False。"""
+        from src.services.practice_service import PracticeService
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.mode = "free"
+            service.llm_client = MagicMock()
+            service.llm_client.complete_json_with_mode = AsyncMock(
+                side_effect=Exception("API timeout")
+            )
+
+            result = await service._llm_grade_answer(
+                user_answer="測驗",
+                expected_answer="測試",
+                accepted_answers=["測試"],
+                question_context="test 是什麼意思？",
+            )
+
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_submit_answer_uses_accepted_answers(self):
+        """submit_answer 應使用 accepted_answers 進行 Phase 1 匹配。"""
+        from src.services.practice_service import PracticeService
+
+        question = PracticeQuestion(
+            question_id="q1",
+            item_id="item1",
+            practice_type=PracticeType.VOCAB_MEANING,
+            prompt="考える（かんがえる）",
+            expected_answer="思考",
+            accepted_answers=["思考", "考慮", "想"],
+            item_key="vocab:考える",
+        )
+
+        session = PracticeSession(
+            session_id="s1",
+            user_id="user1",
+            questions=[question],
+            current_index=0,
+        )
+
+        with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
+            service = PracticeService.__new__(PracticeService)
+            service.mode = "free"
+            service.llm_client = MagicMock()
+            service.session_service = MagicMock()
+            service.session_service.get_session = AsyncMock(return_value=session)
+            service.session_service.clear_session = AsyncMock()
+            service.practice_log_repo = MagicMock()
+            service.practice_log_repo.create_log = AsyncMock()
+
+            # 「考慮」是同義詞，在 accepted_answers 中，Phase 1 就應該命中
+            answer, feedback = await service.submit_answer("user1", "考慮")
+
+            assert answer is not None
+            assert answer.is_correct is True
+            # LLM 不應被呼叫（Phase 1 命中）
+            service.llm_client.complete_json_with_mode.assert_not_called()

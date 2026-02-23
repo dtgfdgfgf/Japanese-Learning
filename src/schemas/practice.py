@@ -41,6 +41,10 @@ class PracticeQuestion(BaseModel):
     practice_type: PracticeType = Field(..., description="Type of practice")
     prompt: str = Field(..., description="Question prompt to show user")
     expected_answer: str = Field(..., description="Expected correct answer")
+    accepted_answers: list[str] = Field(
+        default_factory=list,
+        description="所有可接受的答案（含同義詞、讀音變體）"
+    )
     hints: list[str] = Field(
         default_factory=list,
         description="Optional hints for the question"

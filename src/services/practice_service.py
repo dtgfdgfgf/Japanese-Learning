@@ -17,8 +17,10 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.lib.normalizer import is_correct_answer, normalize_for_compare
+from src.lib.llm_client import get_llm_client
+from src.lib.normalizer import is_correct_answer, kanji_to_reading_variants, normalize_for_compare
 from src.models.item import Item
+from src.prompts.grader import GRADER_SYSTEM_PROMPT, format_grader_request
 from src.repositories.item_repo import ItemRepository
 from src.repositories.practice_log_repo import PracticeLogRepository
 from src.schemas.practice import (
@@ -61,6 +63,7 @@ class PracticeService:
         self.item_repo = ItemRepository(session)
         self.practice_log_repo = PracticeLogRepository(session)
         self.session_service = SessionService(session)
+        self.llm_client = get_llm_client()
 
     async def create_session(
         self,
@@ -292,12 +295,19 @@ class PracticeService:
         elif self.target_lang == "en" and pronunciation:
             hints.append(f"發音：{pronunciation}")
 
+        # 建構可接受答案：漢字 + 讀音變體（日文）或僅 surface（英文）
+        if self.target_lang == "ja" and reading:
+            accepted = kanji_to_reading_variants(surface, reading)
+        else:
+            accepted = [surface]
+
         return PracticeQuestion(
             question_id=question_id,
             item_id=str(item.item_id),
             practice_type=PracticeType.VOCAB_RECALL,
             prompt=meaning,
             expected_answer=expected,
+            accepted_answers=accepted,
             hints=hints,
             item_key=item.key,
             target_lang=self.target_lang,
@@ -367,12 +377,16 @@ class PracticeService:
         elif self.target_lang == "en" and pronunciation:
             prompt = f"{surface} ({pronunciation})"
 
+        # 建構可接受答案：整個 glossary_zh 陣列
+        accepted = list(glossary) if isinstance(glossary, list) else [str(glossary)]
+
         return PracticeQuestion(
             question_id=question_id,
             item_id=str(item.item_id),
             practice_type=PracticeType.VOCAB_MEANING,
             prompt=prompt,
             expected_answer=meaning,
+            accepted_answers=accepted,
             item_key=item.key,
             target_lang=self.target_lang,
         )
@@ -438,10 +452,22 @@ class PracticeService:
                 in normalize_for_compare(answer_text)
             )
         else:
-            is_correct = is_correct_answer(
-                answer_text,
-                current_question.expected_answer,
+            # Phase 1：嚴格匹配（含 accepted_answers）
+            grading_answers = (
+                current_question.accepted_answers
+                if current_question.accepted_answers
+                else [current_question.expected_answer]
             )
+            is_correct = is_correct_answer(answer_text, grading_answers)
+
+            # Phase 2：LLM 語義 fallback
+            if not is_correct:
+                is_correct = await self._llm_grade_answer(
+                    user_answer=answer_text,
+                    expected_answer=current_question.expected_answer,
+                    accepted_answers=grading_answers,
+                    question_context=current_question.prompt,
+                )
 
         # Create answer record
         practice_answer = PracticeAnswer(
@@ -487,6 +513,47 @@ class PracticeService:
                 feedback += f"\n\n下一題：\n{next_q.format_for_display(practice_session.current_index + 1)}"
 
         return practice_answer, feedback
+
+
+    async def _llm_grade_answer(
+        self,
+        user_answer: str,
+        expected_answer: str,
+        accepted_answers: list[str],
+        question_context: str,
+    ) -> bool:
+        """Phase 2：LLM 語義判定 fallback。
+
+        嚴格匹配失敗時，用 LLM 判斷語義等價性。
+        LLM 失敗時 fail-safe 回傳 False。
+        """
+        try:
+            user_message = format_grader_request(
+                user_answer=user_answer,
+                expected_answer=expected_answer,
+                accepted_answers=accepted_answers,
+                question_context=question_context,
+            )
+            parsed, _trace = await self.llm_client.complete_json_with_mode(
+                mode=self.mode,
+                system_prompt=GRADER_SYSTEM_PROMPT,
+                user_message=user_message,
+                temperature=0.0,
+            )
+            result = parsed.get("is_correct", False)
+            reason = parsed.get("reason", "")
+            logger.info(
+                "LLM grading: answer=%r expected=%r is_correct=%s reason=%s",
+                user_answer, expected_answer, result, reason,
+            )
+            return bool(result)
+        except Exception:
+            logger.warning(
+                "LLM grading failed, falling back to strict: answer=%r expected=%r",
+                user_answer, expected_answer,
+                exc_info=True,
+            )
+            return False
 
 
 async def has_active_session(db_session: AsyncSession, user_id: str) -> bool:
