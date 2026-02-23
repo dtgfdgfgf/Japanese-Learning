@@ -795,7 +795,7 @@ async def _handle_save(line_user_id: str, mode: str = "free", target_lang: str =
         return result.message
 
     # 自動抽取
-    doc_id = str(result.doc_id) if result.doc_id else None
+    doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
     if doc_id:
         summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
         if summary:
@@ -827,7 +827,7 @@ async def _handle_word_save(
         return result.message
 
     # 自動抽取
-    doc_id = str(result.doc_id) if result.doc_id else None
+    doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
     if doc_id:
         summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
         if summary:
@@ -863,7 +863,7 @@ async def _handle_confirm_save(
     if not result.success:
         return result.message
 
-    doc_id = str(result.doc_id) if result.doc_id else None
+    doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
 
     # 有預先抽取的 item → 直接建立 item（跳過 ExtractorService）
     if extracted_item and doc_id:
@@ -1370,7 +1370,7 @@ async def _save_and_extract(
     if not result.success:
         return result.message
 
-    doc_id = str(result.doc_id) if result.doc_id else None
+    doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
 
     if doc_id:
         summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
