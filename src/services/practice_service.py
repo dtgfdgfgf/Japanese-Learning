@@ -541,6 +541,7 @@ class PracticeService:
                 system_prompt=GRADER_SYSTEM_PROMPT,
                 user_message=user_message,
                 temperature=0.0,
+                timeout=300,
             )
             result = parsed.get("is_correct", False)
             reason = parsed.get("reason", "")
