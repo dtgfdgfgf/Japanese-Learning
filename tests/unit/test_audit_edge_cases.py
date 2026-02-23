@@ -11,7 +11,6 @@ import pytest
 
 from src.api.webhook import (
     _dispatch_command,
-    _handle_analyze,
     _handle_confirm_save,
     _handle_cost,
     _handle_delete_all_request,
@@ -56,6 +55,7 @@ def _mock_user_state_repo(**kwargs: object) -> MagicMock:
     repo.get_pending_delete = AsyncMock(return_value=kwargs.get("pending_delete"))
     repo.clear_pending_delete = AsyncMock()
     repo.set_pending_save = AsyncMock()
+    repo.set_pending_save_with_item = AsyncMock()
     repo.set_pending_delete = AsyncMock()
     repo.set_delete_confirm_at = AsyncMock()
     repo.is_delete_confirmation_pending = AsyncMock(
@@ -63,13 +63,18 @@ def _mock_user_state_repo(**kwargs: object) -> MagicMock:
     )
     repo.clear_delete_confirm = AsyncMock()
     repo.set_last_message = AsyncMock()
+    # parse_pending_save_content：使用真實邏輯
+    from src.repositories.user_state_repo import UserStateRepository
+    repo.parse_pending_save_content = UserStateRepository.parse_pending_save_content.__get__(repo)
     return repo
 
 
-def _mock_command_service(message: str = "已入庫：test") -> MagicMock:
+def _mock_command_service(message: str = "已入庫：test", success: bool = True, doc_id: str | None = "test-doc-id") -> MagicMock:
     """建立 mock CommandService，save_raw 回傳指定訊息。"""
     result = MagicMock()
     result.message = message
+    result.success = success
+    result.doc_id = doc_id
     service = MagicMock()
     service.save_raw = AsyncMock(return_value=result)
     return service
@@ -234,13 +239,14 @@ class TestConfirmSaveEdgeCases:
         assert result == Messages.PENDING_EXPIRED
 
     async def test_successful_confirm_returns_save_message(self) -> None:
-        """正常確認 → 回傳 save_raw 結果訊息。"""
+        """正常確認 → 回傳包含「已入庫」的訊息。"""
         mock_repo = _mock_user_state_repo(pending_save="apple")
         mock_service = _mock_command_service("已入庫：apple")
         with (
             patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
             patch("src.api.webhook.UserStateRepository", return_value=mock_repo),
             patch("src.api.webhook.CommandService", return_value=mock_service),
+            patch("src.api.webhook._auto_extract", new_callable=AsyncMock, return_value="1 個單字"),
         ):
             result = await _handle_confirm_save("hashed_uid", "Utest")
         assert "已入庫" in result
@@ -253,6 +259,7 @@ class TestConfirmSaveEdgeCases:
             patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
             patch("src.api.webhook.UserStateRepository", return_value=mock_repo),
             patch("src.api.webhook.CommandService", return_value=mock_service),
+            patch("src.api.webhook._auto_extract", new_callable=AsyncMock, return_value=None),
         ):
             await _handle_confirm_save("hashed_uid", "Utest")
         mock_repo.clear_pending_save.assert_awaited_once_with("hashed_uid")
@@ -265,6 +272,7 @@ class TestConfirmSaveEdgeCases:
             patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
             patch("src.api.webhook.UserStateRepository", return_value=mock_repo),
             patch("src.api.webhook.CommandService", return_value=mock_service),
+            patch("src.api.webhook._auto_extract", new_callable=AsyncMock, return_value=None),
         ):
             await _handle_confirm_save("hashed_uid", "Uoriginal")
         call_kwargs = mock_service.save_raw.call_args[1]
@@ -336,94 +344,7 @@ class TestSearchEdgeCases:
 
 
 # ============================================================================
-# 5. ANALYZE（分析）— 5 edge cases
-# ============================================================================
-
-
-class TestAnalyzeEdgeCases:
-    """_handle_analyze edge cases。"""
-
-    async def test_no_deferred_docs_returns_no_deferred(self) -> None:
-        """無待分析文件 → ANALYZE_NO_DEFERRED。"""
-        mock_extractor = MagicMock()
-        mock_extractor.get_deferred_documents = AsyncMock(return_value=[])
-        with (
-            patch("src.api.webhook.hash_user_id", return_value="h"),
-            patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
-            patch("src.services.extractor_service.ExtractorService", return_value=mock_extractor),
-        ):
-            result = await _handle_analyze("Utest")
-        assert result == Messages.ANALYZE_NO_DEFERRED
-
-    async def test_extraction_success_returns_summary(self) -> None:
-        """抽取成功 → 回傳格式化摘要。"""
-        mock_doc = MagicMock()
-        mock_doc.doc_id = uuid.uuid4()
-        mock_extractor = MagicMock()
-        mock_extractor.get_deferred_documents = AsyncMock(return_value=[mock_doc])
-        mock_extractor.extract = AsyncMock(return_value=MagicMock())
-        mock_summary = MagicMock()
-        mock_summary.to_message.return_value = "✨ 抽出 3 個單字"
-        with (
-            patch("src.api.webhook.hash_user_id", return_value="h"),
-            patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
-            patch("src.services.extractor_service.ExtractorService", return_value=mock_extractor),
-            patch("src.services.extractor_service.create_extraction_summary", return_value=mock_summary),
-        ):
-            result = await _handle_analyze("Utest")
-        assert "抽出" in result
-
-    async def test_extraction_exception_returns_error(self) -> None:
-        """extract 拋出例外 → ERROR_ANALYZE。"""
-        mock_doc = MagicMock()
-        mock_doc.doc_id = uuid.uuid4()
-        mock_extractor = MagicMock()
-        mock_extractor.get_deferred_documents = AsyncMock(return_value=[mock_doc])
-        mock_extractor.extract = AsyncMock(side_effect=Exception("LLM timeout"))
-        with (
-            patch("src.api.webhook.hash_user_id", return_value="h"),
-            patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
-            patch("src.services.extractor_service.ExtractorService", return_value=mock_extractor),
-        ):
-            result = await _handle_analyze("Utest")
-        assert result == Messages.ERROR_ANALYZE
-
-    async def test_mode_and_lang_passed_to_extractor(self) -> None:
-        """mode 和 target_lang 正確傳遞給 extract()。"""
-        mock_doc = MagicMock()
-        mock_doc.doc_id = uuid.uuid4()
-        mock_extractor = MagicMock()
-        mock_extractor.get_deferred_documents = AsyncMock(return_value=[mock_doc])
-        mock_extractor.extract = AsyncMock(return_value=MagicMock())
-        mock_summary = MagicMock()
-        mock_summary.to_message.return_value = "ok"
-        with (
-            patch("src.api.webhook.hash_user_id", return_value="h"),
-            patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
-            patch("src.services.extractor_service.ExtractorService", return_value=mock_extractor),
-            patch("src.services.extractor_service.create_extraction_summary", return_value=mock_summary),
-        ):
-            await _handle_analyze("Utest", mode="rigorous", target_lang="en")
-        call_kwargs = mock_extractor.extract.call_args[1]
-        assert call_kwargs["mode"] == "rigorous"
-        assert call_kwargs["target_lang"] == "en"
-
-    async def test_only_first_deferred_doc_processed(self) -> None:
-        """get_deferred_documents limit=1 → 只取第一筆。"""
-        mock_extractor = MagicMock()
-        mock_extractor.get_deferred_documents = AsyncMock(return_value=[])
-        with (
-            patch("src.api.webhook.hash_user_id", return_value="h"),
-            patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
-            patch("src.services.extractor_service.ExtractorService", return_value=mock_extractor),
-        ):
-            await _handle_analyze("Utest")
-        call_kwargs = mock_extractor.get_deferred_documents.call_args
-        assert call_kwargs[1]["limit"] == 1
-
-
-# ============================================================================
-# 6. PRACTICE（練習）— 5 edge cases
+# 5. PRACTICE（練習）— 5 edge cases
 # ============================================================================
 
 
@@ -1103,11 +1024,10 @@ class TestUnknownRouterEdgeCases:
         assert "目前支援日文和英文" in result
 
     async def test_supported_long_text_auto_saves(self) -> None:
-        """支援語言的長文本 >2000 → 自動入庫。"""
-        with patch("src.api.webhook._save_raw_content", new_callable=AsyncMock) as mock_save:
+        """支援語言的長文本 >2000 → 自動入庫 + 自動抽取。"""
+        with patch("src.api.webhook._save_and_extract", new_callable=AsyncMock, return_value="已入庫：aaa...") as mock_save:
             result = await _handle_unknown("Utest", "a" * 3000, mode="free", target_lang="ja")
         mock_save.assert_awaited_once()
-        assert "已直接入庫" in result
 
 
 # ============================================================================
@@ -1147,7 +1067,6 @@ class TestHelpEdgeCases:
         cmd = ParsedCommand(command_type=CommandType.HELP, raw_text="說明")
         result = await _dispatch_command(cmd, "Utest", "說明", mode="free", target_lang="ja")
         assert "入庫" in result
-        assert "分析" in result
         assert "練習" in result
         assert "查詢" in result
         assert "刪除" in result

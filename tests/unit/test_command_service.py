@@ -19,12 +19,6 @@ class TestParseCommand:
         assert result.command_type == CommandType.SAVE
         assert result.keyword is None
 
-    def test_parse_analyze_command(self):
-        """Test parsing '分析' command."""
-        result = parse_command("分析")
-        assert result.command_type == CommandType.ANALYZE
-        assert result.keyword is None
-
     def test_parse_practice_command(self):
         """Test parsing '練習' command."""
         result = parse_command("練習")
@@ -152,7 +146,6 @@ class TestParseCommand:
         """Test all commands from the fixture samples."""
         command_mapping = {
             "save": CommandType.SAVE,
-            "analyze": CommandType.ANALYZE,
             "practice": CommandType.PRACTICE,
             "search": CommandType.SEARCH,
             "delete_item": CommandType.DELETE_ITEM,

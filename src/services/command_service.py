@@ -26,7 +26,6 @@ COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     (r"^1$", CommandType.CONFIRM_SAVE, False),  # 確認入庫
     (r"^(.+)\s+save$", CommandType.WORD_SAVE, True),  # 「單字 save」直接入庫
     (r"^入庫$", CommandType.SAVE, False),
-    (r"^分析$", CommandType.ANALYZE, False),
     (r"^練習$", CommandType.PRACTICE, False),
     (r"^查詢\s+(.+)$", CommandType.SEARCH, True),
     (r"^查詢$", CommandType.SEARCH, False),  # Missing keyword case

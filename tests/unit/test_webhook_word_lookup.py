@@ -3,6 +3,8 @@
 
 驗證 _handle_unknown 中 SAVE intent 短單字路徑和 SEARCH intent 路徑的
 DB 優先查詢 + LLM fallback 行為。
+
+注意：已改用 get_word_explanation_structured()，回傳 (display, extracted_item)。
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -59,6 +61,20 @@ def _mock_item(surface: str = "FIT", item_type: str = "vocab") -> MagicMock:
     return item
 
 
+# 預設的 structured 回傳用 extracted_item
+_SAMPLE_EXTRACTED_ITEM = {
+    "item_type": "vocab",
+    "key": "vocab:FIT",
+    "surface": "FIT",
+    "pronunciation": "/fɪt/",
+    "pos": "adjective",
+    "glossary_zh": ["適合的", "健康的"],
+    "example": "This shirt fits well.",
+    "example_translation": "這件襯衫很合身。",
+    "confidence": 1.0,
+}
+
+
 class TestSaveIntentShortWordDbHit:
     """SAVE intent + 短單字 + DB 有紀錄 → 回傳 DB 結果，不呼叫 LLM。"""
 
@@ -72,7 +88,7 @@ class TestSaveIntentShortWordDbHit:
         mock_get_router: MagicMock,
         mock_hash: MagicMock,
     ) -> None:
-        """DB 有結果時直接回傳搜尋結果，不呼叫 get_word_explanation。"""
+        """DB 有結果時直接回傳搜尋結果，不呼叫 get_word_explanation_structured。"""
         from src.schemas.router import IntentType, RouterResponse
 
         mock_router = MagicMock()
@@ -92,7 +108,7 @@ class TestSaveIntentShortWordDbHit:
         # 應包含搜尋結果
         assert "FIT" in result
         # 不應呼叫 LLM 解釋
-        mock_router.get_word_explanation.assert_not_called()
+        mock_router.get_word_explanation_structured.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
@@ -125,6 +141,7 @@ class TestSaveIntentShortWordDbHit:
 
             mock_user_state_repo = MagicMock()
             mock_user_state_repo.set_pending_save = AsyncMock()
+            mock_user_state_repo.set_pending_save_with_item = AsyncMock()
 
             with patch(
                 "src.api.webhook.UserStateRepository",
@@ -134,10 +151,11 @@ class TestSaveIntentShortWordDbHit:
 
             # pending_save 不應被設定
             mock_user_state_repo.set_pending_save.assert_not_awaited()
+            mock_user_state_repo.set_pending_save_with_item.assert_not_awaited()
 
 
 class TestSaveIntentShortWordDbMiss:
-    """SAVE intent + 短單字 + DB 無紀錄 → 呼叫 LLM 解釋，設 pending_save。"""
+    """SAVE intent + 短單字 + DB 無紀錄 → 呼叫 LLM 解釋，設 pending_save_with_item。"""
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.get_session")
@@ -151,12 +169,8 @@ class TestSaveIntentShortWordDbMiss:
         mock_hash: MagicMock,
         mock_session_ctx: MagicMock,
     ) -> None:
-        """DB 無結果時呼叫 LLM 解釋並設定 pending_save。"""
+        """DB 無結果時呼叫 structured LLM 解釋並設定 pending_save_with_item。"""
         from src.schemas.router import IntentType, RouterResponse
-
-        mock_word_resp = MagicMock()
-        mock_word_resp.content = "FIT 的意思是..."
-        mock_word_resp.to_trace.return_value = MagicMock()
 
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
@@ -165,7 +179,9 @@ class TestSaveIntentShortWordDbMiss:
                 None,
             )
         )
-        mock_router.get_word_explanation = AsyncMock(return_value=mock_word_resp)
+        mock_router.get_word_explanation_structured = AsyncMock(
+            return_value=("FIT 的意思是...", _SAMPLE_EXTRACTED_ITEM)
+        )
         mock_get_router.return_value = mock_router
 
         # DB 無結果
@@ -179,6 +195,7 @@ class TestSaveIntentShortWordDbMiss:
 
         mock_user_state_repo = MagicMock()
         mock_user_state_repo.set_pending_save = AsyncMock()
+        mock_user_state_repo.set_pending_save_with_item = AsyncMock()
 
         with patch(
             "src.api.webhook.UserStateRepository",
@@ -186,13 +203,65 @@ class TestSaveIntentShortWordDbMiss:
         ):
             result = await _handle_unknown("Utest", "FIT", mode="free", target_lang="en")
 
-        # 應呼叫 LLM 解釋
-        mock_router.get_word_explanation.assert_awaited_once_with(
+        # 應呼叫 structured LLM 解釋
+        mock_router.get_word_explanation_structured.assert_awaited_once_with(
             "FIT", mode="free", target_lang="en"
         )
-        # 應設定 pending_save
-        mock_user_state_repo.set_pending_save.assert_awaited_once_with("hashed_user", "FIT")
+        # 應設定 pending_save_with_item（因為有 extracted_item）
+        mock_user_state_repo.set_pending_save_with_item.assert_awaited_once_with(
+            "hashed_user", "FIT", _SAMPLE_EXTRACTED_ITEM
+        )
         # 回覆應包含解釋
+        assert "FIT 的意思是" in result
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_fallback_to_plain_pending_when_no_item(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+        mock_session_ctx: MagicMock,
+    ) -> None:
+        """structured 回傳 item=None → fallback 到 set_pending_save（純文字）。"""
+        from src.schemas.router import IntentType, RouterResponse
+
+        mock_router = MagicMock()
+        mock_router.classify = AsyncMock(
+            return_value=(
+                RouterResponse(intent=IntentType.SAVE, confidence=0.9, reason="single word"),
+                None,
+            )
+        )
+        # item 為 None（JSON parse 失敗的 fallback 情境）
+        mock_router.get_word_explanation_structured = AsyncMock(
+            return_value=("FIT 的意思是...", None)
+        )
+        mock_get_router.return_value = mock_router
+
+        mock_search.return_value = []
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_ctx.return_value = mock_session
+
+        mock_user_state_repo = MagicMock()
+        mock_user_state_repo.set_pending_save = AsyncMock()
+        mock_user_state_repo.set_pending_save_with_item = AsyncMock()
+
+        with patch(
+            "src.api.webhook.UserStateRepository",
+            return_value=mock_user_state_repo,
+        ):
+            result = await _handle_unknown("Utest", "FIT", mode="free", target_lang="en")
+
+        # item=None → 應使用舊的 set_pending_save
+        mock_user_state_repo.set_pending_save.assert_awaited_once_with("hashed_user", "FIT")
+        mock_user_state_repo.set_pending_save_with_item.assert_not_awaited()
         assert "FIT 的意思是" in result
 
 
@@ -216,12 +285,8 @@ class TestSearchIntentSingleWordDbMiss:
         mock_hash: MagicMock,
         mock_session_ctx: MagicMock,
     ) -> None:
-        """SEARCH intent DB 無結果且 keyword 為單字 → LLM 解釋。"""
+        """SEARCH intent DB 無結果且 keyword 為單字 → structured LLM 解釋。"""
         from src.schemas.router import IntentType, RouterResponse
-
-        mock_word_resp = MagicMock()
-        mock_word_resp.content = "FIT 表示適合"
-        mock_word_resp.to_trace.return_value = MagicMock()
 
         mock_router = MagicMock()
         mock_router.classify = AsyncMock(
@@ -235,7 +300,9 @@ class TestSearchIntentSingleWordDbMiss:
                 None,
             )
         )
-        mock_router.get_word_explanation = AsyncMock(return_value=mock_word_resp)
+        mock_router.get_word_explanation_structured = AsyncMock(
+            return_value=("FIT 表示適合", _SAMPLE_EXTRACTED_ITEM)
+        )
         mock_get_router.return_value = mock_router
 
         # DB 無結果
@@ -248,6 +315,7 @@ class TestSearchIntentSingleWordDbMiss:
 
         mock_user_state_repo = MagicMock()
         mock_user_state_repo.set_pending_save = AsyncMock()
+        mock_user_state_repo.set_pending_save_with_item = AsyncMock()
 
         with patch(
             "src.api.webhook.UserStateRepository",
@@ -255,10 +323,12 @@ class TestSearchIntentSingleWordDbMiss:
         ):
             result = await _handle_unknown("Utest", "FIT", mode="free", target_lang="en")
 
-        # 應呼叫 LLM 解釋
-        mock_router.get_word_explanation.assert_awaited_once()
-        # 應設定 pending_save
-        mock_user_state_repo.set_pending_save.assert_awaited_once_with("hashed_user", "FIT")
+        # 應呼叫 structured LLM 解釋
+        mock_router.get_word_explanation_structured.assert_awaited_once()
+        # 應設定 pending_save_with_item
+        mock_user_state_repo.set_pending_save_with_item.assert_awaited_once_with(
+            "hashed_user", "FIT", _SAMPLE_EXTRACTED_ITEM
+        )
         # 回覆應包含解釋
         assert "FIT" in result
 
@@ -299,7 +369,7 @@ class TestSearchIntentMultiWordDbMiss:
         result = await _handle_unknown("Utest", "red apple", mode="free", target_lang="en")
 
         # 不應呼叫 LLM 解釋
-        mock_router.get_word_explanation.assert_not_called()
+        mock_router.get_word_explanation_structured.assert_not_called()
         # 應回傳找不到
         assert "找不到" in result
 
@@ -349,7 +419,7 @@ class TestSearchIntentDbHit:
         # 回覆應包含搜尋結果
         assert "食べる" in result
         # 不應呼叫 LLM 解釋
-        mock_router.get_word_explanation.assert_not_called()
+        mock_router.get_word_explanation_structured.assert_not_called()
 
 
 # ============================================================================
@@ -382,7 +452,7 @@ class TestWordExplanationApiFailure:
                 None,
             )
         )
-        mock_router.get_word_explanation = AsyncMock(
+        mock_router.get_word_explanation_structured = AsyncMock(
             side_effect=Exception("Gemini API error")
         )
         mock_get_router.return_value = mock_router
@@ -395,6 +465,7 @@ class TestWordExplanationApiFailure:
 
         mock_user_state_repo = MagicMock()
         mock_user_state_repo.set_pending_save = AsyncMock()
+        mock_user_state_repo.set_pending_save_with_item = AsyncMock()
 
         with patch(
             "src.api.webhook.UserStateRepository",
@@ -404,6 +475,7 @@ class TestWordExplanationApiFailure:
 
         assert "API呼叫失敗" in result
         mock_user_state_repo.set_pending_save.assert_not_awaited()
+        mock_user_state_repo.set_pending_save_with_item.assert_not_awaited()
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.get_session")
@@ -432,7 +504,7 @@ class TestWordExplanationApiFailure:
                 None,
             )
         )
-        mock_router.get_word_explanation = AsyncMock(
+        mock_router.get_word_explanation_structured = AsyncMock(
             side_effect=Exception("API timeout")
         )
         mock_get_router.return_value = mock_router

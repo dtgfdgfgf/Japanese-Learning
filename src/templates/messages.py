@@ -52,7 +52,6 @@ class MessageTemplate:
 _MESSAGES_ZH_TW: dict[str, str] = {
     # ========== 通用錯誤訊息 ==========
     "ERROR_GENERIC": "發生錯誤，請稍後再試 🙇",
-    "ERROR_ANALYZE": "分析時發生錯誤 😢\n請稍後再試一次",
     "ERROR_PRACTICE": "練習功能暫時無法使用，請稍後再試 🙇",
     "ERROR_PRACTICE_ANSWER": "處理答案時發生錯誤，請重新開始練習",
     "ERROR_SEARCH": "搜尋時發生錯誤，請稍後再試",
@@ -66,7 +65,10 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     
     # ========== 入庫相關 ==========
     "SAVE_SUCCESS": "已入庫：{content_preview}",
-    "SAVE_SUCCESS_WITH_HINT": "已入庫：{content_preview}\n\n💡 輸入「分析」來抽取單字和文法",
+    "SAVE_SUCCESS_WITH_HINT": "已入庫：{content_preview}\n\n💡 輸入「練習」開始複習",
+    "SAVE_AND_EXTRACT_SUCCESS": "✅ 已入庫 {summary}\n💡 輸入「練習」開始複習",
+    "SAVE_EXTRACT_FAILED_HINT": "✅ 已入庫\n\n⚠️ 自動分析失敗，請稍後再入庫一次",
+    "WORD_SAVE_AND_EXTRACT": "✅ {word}已入庫\n💡 輸入「練習」開始複習",
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
     "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，請在 5 分鐘內輸入「1」即可入庫\n直接輸入其他單字將取消本次入庫並開始新查詢\n若非你要查的字，請重新輸入正確的拼寫",
     "WORD_MULTI_DETECTED": "💡 偵測到多個單字，目前處理「{first_word}」。{remaining} 請逐一輸入。",
@@ -77,15 +79,9 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "INPUT_URL_DETECTED": "目前不支援直接輸入 URL 🔗\n請複製文章的文字內容後貼上",
     "INPUT_LIKELY_ROMAJI": "看起來是日語的羅馬字拼音 ✏️\n請開啟日文輸入法後重新輸入，或直接貼上日文文字",
     "PENDING_WRONG_NUMBER": "只有輸入「1」可以確認入庫喔 ☝️\n輸入「1」入庫，或輸入其他單字繼續查詢",
-    "INPUT_LONG_TEXT_SAVED": "📄 文章較長（{length} 字），已直接入庫\n\n💡 輸入「分析」來抽取單字和文法",
+    "INPUT_LONG_TEXT_SAVED": "📄 文章較長（{length} 字），已直接入庫",
     "INPUT_NON_TEXT": "目前僅支援文字訊息 📝\n請將想查詢的內容以文字方式輸入",
     "INPUT_UNSUPPORTED_LANG": "目前支援日文和英文內容 🌐\n請輸入日文或英文的學習素材",
-    
-    # ========== 分析相關 ==========
-    "ANALYZE_NO_DEFERRED": "沒有待分析的素材 📭\n請先「入庫」一些學習內容",
-    "ANALYZE_EMPTY_RESULT": "沒有發現可學習的單字或文法 📝",
-    "ANALYZE_SUCCESS": "✨ 抽出 {summary}",
-    "ANALYZE_TRUNCATED_NOTE": "\n（內容較長，已限制抽取數量）",
     
     # ========== 搜尋相關 ==========
     "SEARCH_HINT": "請提供查詢關鍵字，例如：查詢 考える",
@@ -169,7 +165,6 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 
 • 入庫 - 儲存上一則訊息的學習內容
 • <單字> save - 直接入庫指定單字（例：鋭い save）
-• 分析 - 分析已入庫的內容，抽取單字/文法
 • 練習 - 開始練習題
 • 結束練習（或 停止練習）- 中途結束練習
 • 查詢 <關鍵字> - 搜尋已入庫的內容
@@ -184,8 +179,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 
 💡 使用方式：
 ▸ 查單字：直接輸入單字 → 查看解釋 → 輸入「1」入庫
-▸ 學文章：貼上文章 → 輸入「入庫」→「分析」→「練習」
-（長文章會自動入庫，不需另外輸入「入庫」）""",
+▸ 學文章：貼上文章 → 輸入「入庫」→「練習」
+（入庫後會自動分析抽取單字和文法，長文章會自動入庫）""",
     "HELP_WITH_STATUS": "{help_message}\n\n⚙️ 目前模式：{mode_label}｜學習語言：{lang_label}",
     
     # ========== 隱私訊息 ==========
@@ -294,7 +289,6 @@ class Messages:
     
     # 通用錯誤
     ERROR_GENERIC: str = _MESSAGES_ZH_TW["ERROR_GENERIC"]
-    ERROR_ANALYZE: str = _MESSAGES_ZH_TW["ERROR_ANALYZE"]
     ERROR_PRACTICE: str = _MESSAGES_ZH_TW["ERROR_PRACTICE"]
     ERROR_PRACTICE_ANSWER: str = _MESSAGES_ZH_TW["ERROR_PRACTICE_ANSWER"]
     ERROR_SEARCH: str = _MESSAGES_ZH_TW["ERROR_SEARCH"]
@@ -309,10 +303,6 @@ class Messages:
     # 入庫
     SAVE_NO_CONTENT: str = _MESSAGES_ZH_TW["SAVE_NO_CONTENT"]
     PENDING_EXPIRED: str = _MESSAGES_ZH_TW["PENDING_EXPIRED"]
-    
-    # 分析
-    ANALYZE_NO_DEFERRED: str = _MESSAGES_ZH_TW["ANALYZE_NO_DEFERRED"]
-    ANALYZE_EMPTY_RESULT: str = _MESSAGES_ZH_TW["ANALYZE_EMPTY_RESULT"]
     
     # 搜尋
     SEARCH_HINT: str = _MESSAGES_ZH_TW["SEARCH_HINT"]

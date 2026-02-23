@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from pydantic import ValidationError
 
 from src.lib.llm_client import LLMResponse, get_llm_client
 from src.prompts.router import format_router_request, get_system_prompt
-from src.schemas.router import IntentType, RouterResponse, RouterClassification
-from src.templates.messages import Messages
-
+from src.schemas.router import IntentType, RouterClassification, RouterResponse
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +315,120 @@ class RouterService:
         except Exception as e:
             logger.error(f"Word explanation generation failed: {e}")
             raise
+
+    async def get_word_explanation_structured(
+        self,
+        word: str,
+        mode: str = "free",
+        target_lang: str = "ja",
+    ) -> tuple[str, dict[str, Any] | None]:
+        """取得單字解釋並同時回傳結構化 item 資料。
+
+        一次 LLM 呼叫同時回傳使用者友善的解釋和結構化 ExtractedItem 欄位，
+        省去後續再呼叫 ExtractorService 的步驟。
+
+        Args:
+            word: 要解釋的單字
+            mode: LLM mode (cheap/balanced/rigorous)
+            target_lang: 目標語言 (ja/en)
+
+        Returns:
+            (display_text, extracted_item_dict | None)
+            - display_text: 使用者友善的 markdown 解釋
+            - extracted_item_dict: 結構化 item 資料（JSON parse 失敗時為 None）
+        """
+        if target_lang == "ja":
+            system_prompt = """你是一個專業的日語老師。請用 JSON 格式回傳以下兩個欄位：
+
+1. "display": 用繁體中文解釋這個日文單字，格式如下：
+📖 單字（讀音，如有漢字）
+詞性 ・ 簡短類別說明
+
+意思（1-2句話）
+
+📝 例句
+[日文例句]
+（中文翻譯）
+
+保持簡潔，不要太冗長。若詞彙有重要用法陷阱可加一行說明。
+
+2. "item": 結構化資料，包含以下欄位：
+- "surface": 單字表記形（如「考える」）
+- "reading": 假名讀音（如「かんがえる」）
+- "pos": 詞性（如 "verb", "noun", "i-adjective"）
+- "glossary_zh": 繁體中文釋義列表（如 ["思考", "考慮"]）
+- "example": 日文例句
+- "example_translation": 例句的繁體中文翻譯
+
+回覆必須是合法 JSON。"""
+        else:
+            system_prompt = """你是一個專業的英語老師。請用 JSON 格式回傳以下兩個欄位：
+
+1. "display": 用繁體中文解釋這個英文單字，格式如下：
+📖 單字 /音標/
+詞性
+
+意思（1-2句話）
+
+📝 例句
+[英文例句]
+（中文翻譯）
+
+💡 用法提示（若該字有常見用法陷阱或搭配詞則加上，否則省略）
+
+保持簡潔，不要太冗長。
+
+2. "item": 結構化資料，包含以下欄位：
+- "surface": 單字（如 "consider"）
+- "pronunciation": 音標（如 "/kənˈsɪdər/"）
+- "pos": 詞性（如 "verb", "noun", "adjective"）
+- "glossary_zh": 繁體中文釋義列表（如 ["考慮", "認為"]）
+- "example": 英文例句
+- "example_translation": 例句的繁體中文翻譯
+
+回覆必須是合法 JSON。"""
+
+        try:
+            response_data, _ = await self.llm_client.complete_json_with_mode(
+                mode=mode,
+                system_prompt=system_prompt,
+                user_message=word,
+                temperature=0.3,
+            )
+
+            display = response_data.get("display", "")
+            item_data = response_data.get("item")
+
+            if not display:
+                # JSON 成功但 display 為空，不應發生但做防禦
+                logger.warning("Structured word explanation returned empty display")
+                return word, item_data
+
+            # 組裝 extracted_item_dict（與 ExtractedItem schema 相容）
+            extracted_item: dict[str, Any] | None = None
+            if item_data and isinstance(item_data, dict):
+                extracted_item = {
+                    "item_type": "vocab",
+                    "key": f"vocab:{item_data.get('surface', word)}",
+                    "surface": item_data.get("surface", word),
+                    "pos": item_data.get("pos"),
+                    "glossary_zh": item_data.get("glossary_zh", []),
+                    "example": item_data.get("example"),
+                    "example_translation": item_data.get("example_translation"),
+                    "confidence": 1.0,
+                }
+                if target_lang == "ja":
+                    extracted_item["reading"] = item_data.get("reading")
+                else:
+                    extracted_item["pronunciation"] = item_data.get("pronunciation")
+
+            return display, extracted_item
+
+        except Exception as e:
+            logger.warning(f"Structured word explanation failed, falling back: {e}")
+            # Fallback：呼叫原版 get_word_explanation
+            resp = await self.get_word_explanation(word, mode=mode, target_lang=target_lang)
+            return resp.content, None
 
 
 # 模組層級 singleton

@@ -616,57 +616,43 @@ class TestCase26LongTextDirectSave:
     async def test_long_text_saved_directly(
         self, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
     ):
-        """2001+ 字文本跳過 Router，直接入庫 + 顯示長度提示。"""
+        """2001+ 字文本跳過 Router，直接入庫 + 自動抽取。"""
         mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
             mock_get_line, mock_session_ctx
         )
-
-        mock_save_result = MagicMock()
-        mock_save_result.message = "已入庫：長文本..."
-
-        mock_cmd_service = MagicMock()
-        mock_cmd_service.save_raw = AsyncMock(return_value=mock_save_result)
 
         with (
             patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
             patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
             patch("src.api.webhook.build_mode_quick_replies", return_value=None),
-            patch("src.api.webhook.CommandService", return_value=mock_cmd_service),
+            patch("src.api.webhook._save_and_extract", new_callable=AsyncMock, return_value="已入庫：ああ...\n\n✨ 抽出 3 個單字") as mock_save_extract,
         ):
             long_text = "あ" * 2001
             event = _make_message_event(long_text)
             await handle_message_event(event)
 
         reply_text = _get_reply_text(mock_line)
-        assert "2001" in reply_text
-        assert "分析" in reply_text
-        mock_cmd_service.save_raw.assert_awaited_once()
+        assert "已入庫" in reply_text
+        mock_save_extract.assert_awaited_once()
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.get_line_client")
     @patch("src.api.webhook.get_session")
     @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
     @patch("src.api.webhook.has_active_session", new_callable=AsyncMock, return_value=False)
-    async def test_long_text_save_failure_no_analyze_hint(
+    async def test_long_text_save_failure_returns_error(
         self, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
     ):
-        """長文本自動入庫失敗時，不應附加分析提示。"""
+        """長文本自動入庫失敗時，回傳錯誤訊息。"""
         mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
             mock_get_line, mock_session_ctx
         )
-
-        mock_save_result = MagicMock()
-        mock_save_result.success = False
-        mock_save_result.message = Messages.ERROR_SAVE
-
-        mock_cmd_service = MagicMock()
-        mock_cmd_service.save_raw = AsyncMock(return_value=mock_save_result)
 
         with (
             patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
             patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
             patch("src.api.webhook.build_mode_quick_replies", return_value=None),
-            patch("src.api.webhook.CommandService", return_value=mock_cmd_service),
+            patch("src.api.webhook._save_and_extract", new_callable=AsyncMock, return_value=Messages.ERROR_SAVE),
         ):
             long_text = "あ" * 2001
             event = _make_message_event(long_text)
@@ -674,7 +660,6 @@ class TestCase26LongTextDirectSave:
 
         reply_text = _get_reply_text(mock_line)
         assert Messages.ERROR_SAVE in reply_text
-        assert "輸入「分析」來抽取單字和文法" not in reply_text
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.get_line_client")

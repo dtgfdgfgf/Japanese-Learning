@@ -15,7 +15,6 @@ class IntentType(str, Enum):
     """Possible intents from Router classification."""
     
     SAVE = "save"           # User wants to save content
-    ANALYZE = "analyze"     # User wants to analyze content
     PRACTICE = "practice"   # User wants to practice
     SEARCH = "search"       # User wants to search
     DELETE = "delete"       # User wants to delete

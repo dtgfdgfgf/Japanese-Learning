@@ -4,7 +4,6 @@ T028: Create LINE webhook handler in src/api/webhook.py
 T029: Wire up "入庫" command to save raw and create deferred doc
 T030: Add validation for empty/missing previous message
 T031: Format LINE reply message for save confirmation
-T038: Wire up "分析" command to ExtractorService
 T049: Wire up "練習" command to PracticeService
 """
 
@@ -32,7 +31,7 @@ from src.lib.security import hash_user_id
 from src.models.item import Item
 from src.repositories.user_profile_repo import UserProfileRepository
 from src.repositories.user_state_repo import UserStateRepository
-from src.schemas.command import CommandResult, CommandType, ParsedCommand
+from src.schemas.command import CommandType, ParsedCommand
 from src.services.command_service import (
     LANG_NAME_MAP,
     MODE_NAME_MAP,
@@ -45,13 +44,11 @@ from src.templates.messages import (
     format_help_with_status,
     format_lang_switch_confirm,
     format_mode_switch_confirm,
-    format_save_success,
     format_search_no_result,
     format_search_result_header,
     format_search_result_more,
     format_usage_footer,
     format_word_multi_detected,
-    truncate_content_preview,
 )
 
 if TYPE_CHECKING:
@@ -169,7 +166,6 @@ def _has_supported_language_content(text: str) -> bool:
 # Edge Case 13: 近似指令偵測（開頭匹配但有多餘字元，最多容忍 5 字元差距）
 _COMMAND_HINTS: dict[str, str] = {
     "入庫": "入庫",
-    "分析": "分析",
     "練習": "練習",
     "查詢": "查詢 <關鍵字>",
     "說明": "說明",
@@ -477,10 +473,10 @@ async def handle_message_event(event: MessageEvent) -> None:
         # 處理 pending_save 狀態
         elif parsed.command_type == CommandType.CONFIRM_SAVE and has_pending_save:
             # 用戶輸入「1」確認入庫
-            response = await _handle_confirm_save(hashed_uid, user_id)
+            response = await _handle_confirm_save(hashed_uid, user_id, current_mode, target_lang)
         elif has_pending_save and parsed.command_type == CommandType.SAVE:
             # 用戶輸入「入庫」→ 視同確認，直接儲存 pending 內容
-            response = await _handle_confirm_save(hashed_uid, user_id)
+            response = await _handle_confirm_save(hashed_uid, user_id, current_mode, target_lang)
         elif has_pending_save and parsed.command_type not in PENDING_SAFE_COMMANDS:
             # Edge Case 24: 單一數字 0-9 但非「1」→ 提示，不清除 pending
             stripped_input = text.strip()
@@ -700,16 +696,13 @@ async def _dispatch_command(
         return Messages.PRIVACY
 
     if command_type == CommandType.SAVE:
-        return await _handle_save(line_user_id)
+        return await _handle_save(line_user_id, mode, target_lang)
 
     if command_type == CommandType.WORD_SAVE:
-        return await _handle_word_save(line_user_id, command.keyword)
+        return await _handle_word_save(line_user_id, command.keyword, mode, target_lang)
 
     if command_type == CommandType.SEARCH:
         return await _handle_search(line_user_id, command.keyword)
-
-    if command_type == CommandType.ANALYZE:
-        return await _handle_analyze(line_user_id, mode, target_lang)
 
     if command_type == CommandType.PRACTICE:
         return await _handle_practice(line_user_id, mode, target_lang)
@@ -732,7 +725,54 @@ async def _dispatch_command(
     return await _handle_unknown(line_user_id, raw_text, mode, target_lang)
 
 
-async def _handle_save(line_user_id: str) -> str:
+async def _auto_extract(
+    hashed_uid: str,
+    doc_id: str,
+    mode: str,
+    target_lang: str,
+) -> str | None:
+    """自動抽取已入庫文件的單字/文法。
+
+    Args:
+        hashed_uid: Hashed LINE user ID
+        doc_id: 剛建立的 document ID
+        mode: LLM mode
+        target_lang: 目標語言
+
+    Returns:
+        抽取摘要字串（如「1 個單字 和 2 個文法」），失敗時回傳 None
+    """
+    try:
+        async with get_session() as session:
+            from src.services.extractor_service import (
+                ExtractorService,
+                create_extraction_summary,
+            )
+
+            extractor = ExtractorService(session)
+            result = await extractor.extract(
+                doc_id=doc_id,
+                user_id=hashed_uid,
+                mode=mode,
+                target_lang=target_lang,
+            )
+
+            summary = create_extraction_summary(result)
+            if summary.total_count == 0:
+                return None
+            # 組裝摘要文字（如「1 個單字 和 2 個文法」）
+            parts = []
+            if summary.vocab_count > 0:
+                parts.append(f"{summary.vocab_count} 個單字")
+            if summary.grammar_count > 0:
+                parts.append(f"{summary.grammar_count} 個文法")
+            return " 和 ".join(parts)
+    except Exception as e:
+        logger.error(f"Auto-extract failed for doc {doc_id}: {e}")
+        return None
+
+
+async def _handle_save(line_user_id: str, mode: str = "free", target_lang: str = "ja") -> str:
     """處理入庫指令。"""
     hashed_uid = hash_user_id(line_user_id)
 
@@ -751,13 +791,30 @@ async def _handle_save(line_user_id: str) -> str:
 
         await user_state_repo.clear_last_message(hashed_uid)
 
+    if not result.success:
+        return result.message
+
+    # 自動抽取
+    doc_id = str(result.doc_id) if result.doc_id else None
+    if doc_id:
+        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
+        if summary:
+            return Messages.format("SAVE_AND_EXTRACT_SUCCESS", summary=summary)
+        return Messages.format("SAVE_EXTRACT_FAILED_HINT")
     return result.message
 
 
-async def _handle_word_save(line_user_id: str, word: str | None) -> str:
+async def _handle_word_save(
+    line_user_id: str,
+    word: str | None,
+    mode: str = "free",
+    target_lang: str = "ja",
+) -> str:
     """處理「單字 入庫」直接入庫指令。"""
     if not word or not _has_meaningful_content(word):
         return Messages.SAVE_NO_CONTENT
+
+    hashed_uid = hash_user_id(line_user_id)
 
     async with get_session() as session:
         service = CommandService(session)
@@ -765,28 +822,86 @@ async def _handle_word_save(line_user_id: str, word: str | None) -> str:
             line_user_id=line_user_id,
             content_text=word,
         )
+
+    if not result.success:
+        return result.message
+
+    # 自動抽取
+    doc_id = str(result.doc_id) if result.doc_id else None
+    if doc_id:
+        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
+        if summary:
+            return Messages.format("WORD_SAVE_AND_EXTRACT", word=word)
     return result.message
 
 
-async def _handle_confirm_save(hashed_uid: str, line_user_id: str) -> str:
+async def _handle_confirm_save(
+    hashed_uid: str,
+    line_user_id: str,
+    mode: str = "free",
+    target_lang: str = "ja",
+) -> str:
     """處理確認入庫（用戶輸入「1」）。"""
     async with get_session() as session:
         user_state_repo = UserStateRepository(session)
-        pending_content = await user_state_repo.get_pending_save(hashed_uid)
+        raw_content = await user_state_repo.get_pending_save(hashed_uid)
 
-        if not pending_content:
+        if not raw_content:
             return Messages.PENDING_EXPIRED
+
+        # 解析新舊格式
+        pending_word, extracted_item = user_state_repo.parse_pending_save_content(raw_content)
 
         service = CommandService(session)
         result = await service.save_raw(
             line_user_id=line_user_id,
-            content_text=pending_content,
+            content_text=pending_word,
         )
 
         await user_state_repo.clear_pending_save(hashed_uid)
 
-        # save_raw() 已回傳格式化訊息，直接使用
+    if not result.success:
         return result.message
+
+    doc_id = str(result.doc_id) if result.doc_id else None
+
+    # 有預先抽取的 item → 直接建立 item（跳過 ExtractorService）
+    if extracted_item and doc_id:
+        try:
+            async with get_session() as session:
+                from src.repositories.item_repo import ItemRepository
+                from src.schemas.extractor import ExtractedItem
+
+                item_repo = ItemRepository(session)
+                item = ExtractedItem(**extracted_item)
+                await item_repo.upsert(
+                    user_id=hashed_uid,
+                    doc_id=doc_id,
+                    item_type=item.item_type,
+                    key=item.key,
+                    payload=item.to_payload(),
+                    source_quote=item.source_quote,
+                    confidence=item.confidence,
+                )
+                # 更新 document 狀態為 parsed
+                from src.repositories.document_repo import DocumentRepository
+
+                doc_repo = DocumentRepository(session)
+                await doc_repo.update(
+                    doc_id, parse_status="parsed", parser_version="v1.0.0"
+                )
+
+            return Messages.format("WORD_SAVE_AND_EXTRACT", word=pending_word)
+        except Exception as e:
+            logger.warning(f"Direct item creation failed, falling back to auto-extract: {e}")
+
+    # 無 item 或直接建立失敗 → auto-extract
+    if doc_id:
+        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
+        if summary:
+            return Messages.format("WORD_SAVE_AND_EXTRACT", word=pending_word)
+
+    return result.message
 
 
 async def _handle_search(line_user_id: str, keyword: str | None) -> str:
@@ -816,39 +931,6 @@ async def _handle_search(line_user_id: str, keyword: str | None) -> str:
         except Exception as e:
             logger.error(f"Search failed: {e}")
             return Messages.ERROR_SEARCH
-
-
-async def _handle_analyze(line_user_id: str, mode: str = "free", target_lang: str = "ja") -> str:
-    """處理分析指令。"""
-    hashed_user_id = hash_user_id(line_user_id)
-
-    async with get_session() as session:
-        from src.services.extractor_service import (
-            ExtractorService,
-            create_extraction_summary,
-        )
-
-        extractor = ExtractorService(session)
-
-        deferred_docs = await extractor.get_deferred_documents(hashed_user_id, limit=1)
-
-        if not deferred_docs:
-            return Messages.ANALYZE_NO_DEFERRED
-
-        doc = deferred_docs[0]
-        try:
-            result = await extractor.extract(
-                doc_id=str(doc.doc_id),
-                user_id=hashed_user_id,
-                mode=mode,
-                target_lang=target_lang,
-            )
-
-            summary = create_extraction_summary(result)
-            return summary.to_message()
-        except Exception as e:
-            logger.error(f"Extraction failed: {e}")
-            return Messages.ERROR_ANALYZE
 
 
 async def _handle_practice(line_user_id: str, mode: str = "free", target_lang: str = "ja") -> str:
@@ -1100,16 +1182,13 @@ async def _handle_unknown(
     if not _has_supported_language_content(raw_text):
         return Messages.format("INPUT_UNSUPPORTED_LANG")
 
-    # Edge Case 20: TSV 格式偵測（試算表複製貼上）→ 直接入庫
+    # Edge Case 20: TSV 格式偵測（試算表複製貼上）→ 直接入庫 + 自動抽取
     if '\t' in raw_text:
-        return await _save_and_hint(line_user_id, raw_text)
+        return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
 
-    # Edge Case 26: 超長文本直接入庫（跳過 Router 節省 LLM tokens）
+    # Edge Case 26: 超長文本直接入庫 + 自動抽取（跳過 Router 節省 LLM tokens）
     if len(raw_text) > LONG_TEXT_THRESHOLD:
-        save_result = await _save_raw_content(line_user_id, raw_text)
-        if not save_result.success:
-            return save_result.message
-        return Messages.format("INPUT_LONG_TEXT_SAVED", length=len(raw_text))
+        return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
 
     from src.lib.llm_client import LLMResponse, LLMTrace
     from src.schemas.router import IntentType
@@ -1133,16 +1212,18 @@ async def _handle_unknown(
             if db_items:
                 return _format_search_results(db_items)
             try:
-                word_resp = await router_service.get_word_explanation(
+                display, extracted_item = await router_service.get_word_explanation_structured(
                     word, mode=mode, target_lang=target_lang
                 )
-                _collect_trace(word_resp, "word_explanation")
             except Exception:
                 return Messages.ERROR_API_CALL
             async with get_session() as session:
                 user_state_repo = UserStateRepository(session)
-                await user_state_repo.set_pending_save(hashed_user_id, word)
-            return Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
+                if extracted_item:
+                    await user_state_repo.set_pending_save_with_item(hashed_user_id, word, extracted_item)
+                else:
+                    await user_state_repo.set_pending_save(hashed_user_id, word)
+            return Messages.format("WORD_EXPLANATION", explanation=display)
 
         classification, classify_resp = await router_service.classify(
             raw_text, mode=mode, target_lang=target_lang,
@@ -1167,16 +1248,18 @@ async def _handle_unknown(
                     return _format_search_results(db_items)
                 # DB 無紀錄：LLM 解釋 + 詢問入庫
                 try:
-                    word_resp = await router_service.get_word_explanation(
+                    display, extracted_item = await router_service.get_word_explanation_structured(
                         word, mode=mode, target_lang=target_lang
                     )
-                    _collect_trace(word_resp, "word_explanation")
                 except Exception:
                     return Messages.ERROR_API_CALL
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
-                    await user_state_repo.set_pending_save(hashed_user_id, word)
-                return Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
+                    if extracted_item:
+                        await user_state_repo.set_pending_save_with_item(hashed_user_id, word, extracted_item)
+                    else:
+                        await user_state_repo.set_pending_save(hashed_user_id, word)
+                return Messages.format("WORD_EXPLANATION", explanation=display)
             else:
                 # 偵測多個空格分隔的短單字（例如 "apple banana cherry"）
                 tokens = stripped_text.split()
@@ -1189,21 +1272,23 @@ async def _handle_unknown(
                     # 處理第一個單字，提示其餘逐一輸入
                     first_word = tokens[0]
                     try:
-                        word_resp = await router_service.get_word_explanation(
+                        display, extracted_item = await router_service.get_word_explanation_structured(
                             first_word, mode=mode, target_lang=target_lang
                         )
-                        _collect_trace(word_resp, "word_explanation")
                     except Exception:
                         return Messages.ERROR_API_CALL
                     async with get_session() as session:
                         user_state_repo = UserStateRepository(session)
-                        await user_state_repo.set_pending_save(hashed_user_id, first_word)
+                        if extracted_item:
+                            await user_state_repo.set_pending_save_with_item(hashed_user_id, first_word, extracted_item)
+                        else:
+                            await user_state_repo.set_pending_save(hashed_user_id, first_word)
                     remaining = "、".join(f"「{t}」" for t in tokens[1:])
-                    base = Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
+                    base = Messages.format("WORD_EXPLANATION", explanation=display)
                     return f"{base}\n\n{format_word_multi_detected(first_word, remaining)}"
                 else:
-                    # 長文本：直接入庫
-                    return await _save_and_hint(line_user_id, raw_text)
+                    # 長文本：直接入庫 + 自動抽取
+                    return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
 
         if classification.intent == IntentType.CHAT:
             chat_resp = await router_service.get_chat_response(
@@ -1218,9 +1303,6 @@ async def _handle_unknown(
         if classification.intent == IntentType.PRACTICE:
             return await _handle_practice(line_user_id, mode, target_lang)
 
-        if classification.intent == IntentType.ANALYZE:
-            return await _handle_analyze(line_user_id, mode, target_lang)
-
         if classification.intent == IntentType.DELETE:
             return Messages.format("DELETE_HINT_USAGE")
 
@@ -1233,16 +1315,18 @@ async def _handle_unknown(
             keyword = classification.keyword
             if _is_single_word(keyword, target_lang):
                 try:
-                    word_resp = await router_service.get_word_explanation(
+                    display, extracted_item = await router_service.get_word_explanation_structured(
                         keyword, mode=mode, target_lang=target_lang
                     )
-                    _collect_trace(word_resp, "word_explanation")
                 except Exception:
                     return Messages.ERROR_API_CALL
                 async with get_session() as session:
                     user_state_repo = UserStateRepository(session)
-                    await user_state_repo.set_pending_save(hashed_user_id, keyword)
-                return Messages.format("WORD_EXPLANATION", explanation=word_resp.content)
+                    if extracted_item:
+                        await user_state_repo.set_pending_save_with_item(hashed_user_id, keyword, extracted_item)
+                    else:
+                        await user_state_repo.set_pending_save(hashed_user_id, keyword)
+                return Messages.format("WORD_EXPLANATION", explanation=display)
 
             return format_search_no_result(keyword)
 
@@ -1270,22 +1354,30 @@ async def _handle_unknown(
                 logger.warning("Failed to write LLM traces to DB", exc_info=True)
 
 
-async def _save_raw_content(line_user_id: str, content: str) -> CommandResult:
-    """入庫原始內容。"""
-    async with get_session() as session:
-        service = CommandService(session)
-        return await service.save_raw(line_user_id=line_user_id, content_text=content)
 
+async def _save_and_extract(
+    line_user_id: str,
+    content: str,
+    mode: str = "free",
+    target_lang: str = "ja",
+) -> str:
+    """入庫原始內容並自動抽取單字/文法。"""
+    hashed_uid = hash_user_id(line_user_id)
 
-async def _save_and_hint(line_user_id: str, content: str) -> str:
-    """入庫原始內容並附加「分析」提示。"""
     async with get_session() as session:
         service = CommandService(session)
         result = await service.save_raw(line_user_id=line_user_id, content_text=content)
     if not result.success:
         return result.message
-    content_preview = truncate_content_preview(content)
-    return format_save_success(content_preview, with_hint=True)
+
+    doc_id = str(result.doc_id) if result.doc_id else None
+
+    if doc_id:
+        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
+        if summary:
+            return Messages.format("SAVE_AND_EXTRACT_SUCCESS", summary=summary)
+        return Messages.format("SAVE_EXTRACT_FAILED_HINT")
+    return result.message
 
 
 # ============================================================================

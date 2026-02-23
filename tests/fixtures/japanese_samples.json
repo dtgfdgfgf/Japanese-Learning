@@ -145,10 +145,6 @@
       "expected_command": "save"
     },
     {
-      "input": "分析",
-      "expected_command": "analyze"
-    },
-    {
       "input": "練習",
       "expected_command": "practice"
     },

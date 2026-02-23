@@ -166,6 +166,51 @@ class UserStateRepository:
         row.pending_save_at = datetime.now(UTC)
         await self.session.flush()
 
+    async def set_pending_save_with_item(
+        self,
+        user_id: str,
+        content: str,
+        extracted_item: dict,
+    ) -> None:
+        """設定待確認入庫的內容，附帶預先抽取的 item 資料。
+
+        將 word + extracted_item 打包為 JSON 存入 pending_save_content，
+        確認入庫時可直接建立 item，省去再次呼叫 ExtractorService。
+
+        Args:
+            user_id: Hashed LINE user ID
+            content: 待確認入庫的單字
+            extracted_item: 結構化 item 資料（與 ExtractedItem schema 相容）
+        """
+        payload = json.dumps(
+            {"word": content, "extracted_item": extracted_item},
+            ensure_ascii=False,
+        )
+        row = await self._get_or_create(user_id)
+        row.pending_save_content = payload
+        row.pending_save_at = datetime.now(UTC)
+        await self.session.flush()
+
+    def parse_pending_save_content(self, raw_content: str) -> tuple[str, dict | None]:
+        """解析 pending_save_content，相容新舊格式。
+
+        新格式：JSON {"word": "...", "extracted_item": {...}}
+        舊格式：純文字（直接回傳）
+
+        Args:
+            raw_content: DB 中的 pending_save_content
+
+        Returns:
+            (content, extracted_item_dict | None)
+        """
+        try:
+            data = json.loads(raw_content)
+            if isinstance(data, dict) and "word" in data:
+                return data["word"], data.get("extracted_item")
+        except (json.JSONDecodeError, TypeError):
+            pass
+        return raw_content, None
+
     async def clear_pending_save(self, user_id: str) -> None:
         """清除待確認入庫狀態。
 
