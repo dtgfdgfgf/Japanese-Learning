@@ -8,6 +8,7 @@ T049: Wire up "練習" command to PracticeService
 """
 
 import asyncio
+import enum
 import logging
 import os
 import time
@@ -89,6 +90,118 @@ FOOTER_RESERVE = 300
 
 # Edge Case 26: 超長文本直接入庫閾值（超過此長度跳過 Router）
 LONG_TEXT_THRESHOLD = 2000
+
+
+# ============================================================================
+# 輸入分類（取代 LLM Router）
+# ============================================================================
+
+
+class InputCategory(enum.Enum):
+    """使用者輸入的結構性分類。
+
+    以假名/CJK/標點/長度等結構特徵做確定性分類，
+    不需要 LLM 呼叫。
+    """
+
+    WORD = "word"          # 單字或短詞 → 查詞解釋 + pending save
+    MATERIAL = "material"  # 素材（句子/段落）→ 直接入庫 + 自動抽取
+    CHAT = "chat"          # 中文問答 → LLM chat
+    UNKNOWN = "unknown"    # 無法判斷 → fallback
+
+
+# 素材判定長度閾值（字元數）
+_MATERIAL_LENGTH_THRESHOLD = 20
+
+# 中文問句標記（_sanitize_text 做 NFKC 正規化後，？→?）
+_QUESTION_MARKERS = ("?", "嗎", "什麼", "怎麼", "如何")
+
+# 句讀標點（表示輸入為句子而非單字）
+# NFKC 正規化後 ！→!、？→?，所以只用半形
+_SENTENCE_PUNCTUATION_JA = ("。", "!", "?", "、", ",")
+_SENTENCE_PUNCTUATION_EN = (".", "!", "?")
+
+
+def _classify_input(text: str, target_lang: str = "ja") -> InputCategory:
+    """根據結構特徵分類使用者輸入。
+
+    分類邏輯：
+    1. 含假名 → 日文內容（有句讀/換行/長度>20 → MATERIAL，否則 → WORD）
+    2. 無假名、有 CJK → 歧義（中文問句 → CHAT，≤20字 → WORD，>20字 → MATERIAL）
+    3. 英文為主 → （有句讀/換行 → MATERIAL，單字 → WORD，2-5短token → WORD，其他 → MATERIAL）
+    4. 有中文問句標記 → CHAT
+    5. 其他 → UNKNOWN
+
+    注意：此函式假設輸入已經過 _sanitize_text() 處理（NFKC 正規化）。
+    """
+    stripped = text.strip()
+    if not stripped:
+        return InputCategory.UNKNOWN
+
+    # 字元統計
+    has_kana = False
+    has_cjk = False
+    ascii_alpha_count = 0
+    total_non_space = 0
+
+    for c in stripped:
+        if c.isspace():
+            continue
+        total_non_space += 1
+        if "\u3040" <= c <= "\u309f" or "\u30a0" <= c <= "\u30ff" or "\uff65" <= c <= "\uff9f":
+            has_kana = True
+        elif "\u4e00" <= c <= "\u9fff":
+            has_cjk = True
+        elif c.isascii() and c.isalpha():
+            ascii_alpha_count += 1
+
+    if total_non_space == 0:
+        return InputCategory.UNKNOWN
+
+    has_newline = "\n" in stripped
+    has_question_marker = any(q in stripped for q in _QUESTION_MARKERS)
+
+    # --- 1. 含假名 → 日文內容 ---
+    if has_kana:
+        has_ja_punct = any(p in stripped for p in _SENTENCE_PUNCTUATION_JA)
+        if has_ja_punct or has_newline or len(stripped) > _MATERIAL_LENGTH_THRESHOLD:
+            return InputCategory.MATERIAL
+        return InputCategory.WORD
+
+    # --- 2. 無假名、有 CJK → 歧義（中/日漢字） ---
+    if has_cjk:
+        if has_question_marker:
+            return InputCategory.CHAT
+        if len(stripped) <= _MATERIAL_LENGTH_THRESHOLD:
+            return InputCategory.WORD
+        return InputCategory.MATERIAL
+
+    # --- 3. 英文為主 ---
+    english_ratio = ascii_alpha_count / total_non_space
+    if english_ratio > 0.5:
+        has_en_punct = any(p in stripped for p in _SENTENCE_PUNCTUATION_EN)
+        if has_en_punct or has_newline:
+            return InputCategory.MATERIAL
+
+        tokens = stripped.split()
+        if len(tokens) == 1:
+            return InputCategory.WORD
+
+        # 2-5 個短 alpha token → 多單字輸入，視為 WORD
+        if 2 <= len(tokens) <= 5 and all(
+            len(t) <= 30 and all(ch.isalpha() or ch == "-" for ch in t)
+            for t in tokens
+        ):
+            return InputCategory.WORD
+
+        return InputCategory.MATERIAL
+
+    # --- 4. 有中文問句標記 → CHAT ---
+    if has_question_marker:
+        return InputCategory.CHAT
+
+    # --- 5. 無法判斷 ---
+    return InputCategory.UNKNOWN
 
 
 # ============================================================================
@@ -1238,7 +1351,7 @@ async def _handle_unknown(
     mode: str = "free",
     target_lang: str = "ja",
 ) -> str:
-    """使用 Router LLM 處理未知指令。"""
+    """以結構特徵分類處理未被指令匹配的輸入。"""
     # Edge Case 13: 近似指令偵測（如「入庫了」→ 建議「入庫」）
     suggestion = _suggest_command(raw_text)
     if suggestion:
@@ -1265,34 +1378,90 @@ async def _handle_unknown(
     if '\t' in raw_text:
         return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
 
-    # Edge Case 26: 超長文本直接入庫 + 自動抽取（跳過 Router 節省 LLM tokens）
+    # Edge Case 26: 超長文本直接入庫 + 自動抽取（跳過分類節省時間）
     if len(raw_text) > LONG_TEXT_THRESHOLD:
         return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
 
-    from src.lib.llm_client import LLMResponse, LLMTrace
-    from src.schemas.router import IntentType
+    # 結構特徵分類（取代 LLM Router）
+    category = _classify_input(raw_text, target_lang)
+
+    if category == InputCategory.WORD:
+        return await _handle_word_input(line_user_id, raw_text, mode, target_lang)
+
+    if category == InputCategory.MATERIAL:
+        return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
+
+    if category == InputCategory.CHAT:
+        from src.services.router_service import get_router_service
+
+        hashed_user_id = hash_user_id(line_user_id)
+        router_service = get_router_service()
+        try:
+            chat_resp = await router_service.get_chat_response(
+                raw_text, mode=mode, target_lang=target_lang,
+            )
+            # 寫入 LLM trace
+            try:
+                from src.repositories.api_usage_log_repo import ApiUsageLogRepository
+
+                async with get_session() as session:
+                    repo = ApiUsageLogRepository(session)
+                    await repo.create_log(
+                        user_id=hashed_user_id,
+                        trace=chat_resp.to_trace(),
+                        operation="chat",
+                    )
+            except Exception:
+                logger.warning("Failed to write chat LLM trace to DB", exc_info=True)
+            return chat_resp.content
+        except Exception as e:
+            logger.error(f"Chat response failed: {e}")
+            return Messages.ERROR_GENERIC
+
+    # UNKNOWN — fallback
+    return Messages.FALLBACK_UNKNOWN
+
+
+async def _handle_word_input(
+    line_user_id: str,
+    raw_text: str,
+    mode: str = "free",
+    target_lang: str = "ja",
+) -> str:
+    """處理 WORD 分類的輸入：DB 搜尋 → LLM 解釋 → pending save。
+
+    包含 multi-word 偵測（"apple banana cherry" → 解釋第一個 + 提示其餘）。
+    """
+    from src.lib.llm_client import LLMTrace
     from src.services.router_service import get_router_service
 
     hashed_user_id = hash_user_id(line_user_id)
     router_service = get_router_service()
-
-    # 收集 LLM traces，在 finally 區塊批次寫入 DB
     llm_traces: list[tuple[LLMTrace, str]] = []
 
-    def _collect_trace(resp: LLMResponse | None, operation: str) -> None:
-        if resp is not None:
-            llm_traces.append((resp.to_trace(), operation))
-
     try:
-        # 短單字直接翻譯（跳過 Router LLM 節省一次 API 呼叫）
-        if _is_short_word_input(raw_text, target_lang):
-            word = raw_text.strip()
-            db_items = await _search_user_items(hashed_user_id, word)
-            if db_items:
-                return _format_search_results(db_items)
+        stripped = raw_text.strip()
+        tokens = stripped.split()
+
+        # 多單字偵測：2-5 個短 alpha token
+        is_multi_word = (
+            len(tokens) >= 2
+            and len(tokens) <= 5
+            and all(len(t) <= 30 for t in tokens)
+            and all(
+                t.isalpha() or all(ch.isalpha() or ch == "-" for ch in t)
+                for t in tokens
+            )
+        )
+
+        if is_multi_word:
+            # 處理第一個單字，提示其餘逐一輸入
+            first_word = tokens[0]
             try:
-                display, extracted_item, word_trace = await router_service.get_word_explanation_structured(
-                    word, mode=mode, target_lang=target_lang
+                display, extracted_item, word_trace = (
+                    await router_service.get_word_explanation_structured(
+                        first_word, mode=mode, target_lang=target_lang
+                    )
                 )
                 if word_trace:
                     llm_traces.append((word_trace, "word_explanation"))
@@ -1301,126 +1470,44 @@ async def _handle_unknown(
             async with get_session() as session:
                 user_state_repo = UserStateRepository(session)
                 if extracted_item:
-                    await user_state_repo.set_pending_save_with_item(hashed_user_id, word, extracted_item)
-                else:
-                    await user_state_repo.set_pending_save(hashed_user_id, word)
-            return Messages.format("WORD_EXPLANATION", explanation=display)
-
-        classification, classify_resp = await router_service.classify(
-            raw_text, mode=mode, target_lang=target_lang,
-        )
-        _collect_trace(classify_resp, "router_classify")
-
-        if classification.intent == IntentType.SAVE and classification.confidence >= 0.8:
-            # 判斷是否為短單字（根據語言調整閾值）
-            stripped_text = raw_text.strip()
-            if target_lang == "ja":
-                # 日文：通常 1-10 字元，設 15 為上限；需為單一 token
-                is_short_word = len(stripped_text) <= 15 and len(stripped_text.split()) == 1
-            else:
-                # 英文：單字通常無空白且較短（split 涵蓋空格、換行、Tab）
-                is_short_word = len(stripped_text) <= 30 and len(stripped_text.split()) == 1
-
-            if is_short_word:
-                # 短單字流程：先查 DB，已入庫則直接顯示
-                word = raw_text.strip()
-                db_items = await _search_user_items(hashed_user_id, word)
-                if db_items:
-                    return _format_search_results(db_items)
-                # DB 無紀錄：LLM 解釋 + 詢問入庫
-                try:
-                    display, extracted_item, word_trace = await router_service.get_word_explanation_structured(
-                        word, mode=mode, target_lang=target_lang
+                    await user_state_repo.set_pending_save_with_item(
+                        hashed_user_id, first_word, extracted_item
                     )
-                    if word_trace:
-                        llm_traces.append((word_trace, "word_explanation"))
-                except Exception:
-                    return Messages.ERROR_API_CALL
-                async with get_session() as session:
-                    user_state_repo = UserStateRepository(session)
-                    if extracted_item:
-                        await user_state_repo.set_pending_save_with_item(hashed_user_id, word, extracted_item)
-                    else:
-                        await user_state_repo.set_pending_save(hashed_user_id, word)
-                return Messages.format("WORD_EXPLANATION", explanation=display)
-            else:
-                # 偵測多個空格分隔的短單字（例如 "apple banana cherry"）
-                tokens = stripped_text.split()
-                is_multi_word = (
-                    2 <= len(tokens) <= 5
-                    and all(len(t) <= 30 for t in tokens)
-                    and all(t.isalpha() or all(c.isalpha() or c == '-' for c in t) for t in tokens)
+                else:
+                    await user_state_repo.set_pending_save(hashed_user_id, first_word)
+            remaining = "、".join(f"「{t}」" for t in tokens[1:])
+            base = Messages.format("WORD_EXPLANATION", explanation=display)
+            return f"{base}\n\n{format_word_multi_detected(first_word, remaining)}"
+
+        # 單字流程：先查 DB，已入庫則直接顯示
+        word = stripped
+        db_items = await _search_user_items(hashed_user_id, word)
+        if db_items:
+            return _format_search_results(db_items)
+
+        # DB 無紀錄：LLM 解釋 + 詢問入庫
+        try:
+            display, extracted_item, word_trace = (
+                await router_service.get_word_explanation_structured(
+                    word, mode=mode, target_lang=target_lang
                 )
-                if is_multi_word:
-                    # 處理第一個單字，提示其餘逐一輸入
-                    first_word = tokens[0]
-                    try:
-                        display, extracted_item, word_trace = await router_service.get_word_explanation_structured(
-                            first_word, mode=mode, target_lang=target_lang
-                        )
-                        if word_trace:
-                            llm_traces.append((word_trace, "word_explanation"))
-                    except Exception:
-                        return Messages.ERROR_API_CALL
-                    async with get_session() as session:
-                        user_state_repo = UserStateRepository(session)
-                        if extracted_item:
-                            await user_state_repo.set_pending_save_with_item(hashed_user_id, first_word, extracted_item)
-                        else:
-                            await user_state_repo.set_pending_save(hashed_user_id, first_word)
-                    remaining = "、".join(f"「{t}」" for t in tokens[1:])
-                    base = Messages.format("WORD_EXPLANATION", explanation=display)
-                    return f"{base}\n\n{format_word_multi_detected(first_word, remaining)}"
-                else:
-                    # 長文本：直接入庫 + 自動抽取
-                    return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
-
-        if classification.intent == IntentType.CHAT:
-            chat_resp = await router_service.get_chat_response(
-                raw_text, mode=mode, target_lang=target_lang,
             )
-            _collect_trace(chat_resp, "chat")
-            return chat_resp.content
-
-        if classification.intent == IntentType.HELP:
-            return format_help_with_status(mode, target_lang)
-
-        if classification.intent == IntentType.PRACTICE:
-            return await _handle_practice(line_user_id, mode, target_lang)
-
-        if classification.intent == IntentType.DELETE:
-            return Messages.format("DELETE_HINT_USAGE")
-
-        if classification.intent == IntentType.SEARCH and classification.keyword:
-            items = await _search_user_items(hashed_user_id, classification.keyword)
-            if items:
-                return _format_search_results(items)
-
-            # DB 無結果 + 單字 → LLM 解釋 + 詢問入庫
-            keyword = classification.keyword
-            if _is_single_word(keyword, target_lang):
-                try:
-                    display, extracted_item, word_trace = await router_service.get_word_explanation_structured(
-                        keyword, mode=mode, target_lang=target_lang
-                    )
-                    if word_trace:
-                        llm_traces.append((word_trace, "word_explanation"))
-                except Exception:
-                    return Messages.ERROR_API_CALL
-                async with get_session() as session:
-                    user_state_repo = UserStateRepository(session)
-                    if extracted_item:
-                        await user_state_repo.set_pending_save_with_item(hashed_user_id, keyword, extracted_item)
-                    else:
-                        await user_state_repo.set_pending_save(hashed_user_id, keyword)
-                return Messages.format("WORD_EXPLANATION", explanation=display)
-
-            return format_search_no_result(keyword)
-
-        return Messages.FALLBACK_UNKNOWN
+            if word_trace:
+                llm_traces.append((word_trace, "word_explanation"))
+        except Exception:
+            return Messages.ERROR_API_CALL
+        async with get_session() as session:
+            user_state_repo = UserStateRepository(session)
+            if extracted_item:
+                await user_state_repo.set_pending_save_with_item(
+                    hashed_user_id, word, extracted_item
+                )
+            else:
+                await user_state_repo.set_pending_save(hashed_user_id, word)
+        return Messages.format("WORD_EXPLANATION", explanation=display)
 
     except Exception as e:
-        logger.error(f"Router failed: {e}")
+        logger.error(f"Word input handling failed: {e}")
         return Messages.ERROR_GENERIC
 
     finally:
@@ -1471,44 +1558,6 @@ async def _save_and_extract(
 # Helper Functions
 # ============================================================================
 
-
-def _is_single_word(text: str, target_lang: str) -> bool:
-    """判斷文字是否為可用 LLM 解釋的單一短字詞。"""
-    stripped = text.strip()
-    if len(stripped.split()) != 1:
-        return False
-    return len(stripped) <= 15 if target_lang == "ja" else len(stripped) <= 30
-
-
-def _is_short_word_input(text: str, target_lang: str) -> bool:
-    """判斷輸入是否為可直接翻譯的單一詞彙（跳過 Router LLM）。
-
-    條件：
-    - 單一 token（無空格）
-    - 非問句
-    - 語言符合 target_lang 且長度在合理範圍內
-    """
-    stripped = text.strip()
-
-    # 必須是單一 token
-    if len(stripped.split()) != 1:
-        return False
-
-    # 問句不攔截，交給 Router 判斷 CHAT
-    if any(q in stripped for q in ("?", "？", "嗎", "什麼", "怎麼", "如何")):
-        return False
-
-    if target_lang == "en":
-        # 英文模式：主要由 ASCII 字母組成（允許連字符，如 "well-known"）
-        alpha_chars = sum(1 for c in stripped if c.isalpha() and c.isascii())
-        total = max(len(stripped), 1)
-        return alpha_chars / total > 0.8 and 1 <= len(stripped) <= 30
-
-    else:  # ja
-        # 日文模式：必須含假名或漢字
-        has_kana = any('\u3040' <= c <= '\u30ff' or '\uff65' <= c <= '\uff9f' for c in stripped)
-        has_cjk = any('\u4e00' <= c <= '\u9fff' for c in stripped)
-        return (has_kana or has_cjk) and 1 <= len(stripped) <= 15
 
 
 async def _search_user_items(hashed_user_id: str, keyword: str, limit: int = MAX_SEARCH_RESULTS) -> list[Item]:

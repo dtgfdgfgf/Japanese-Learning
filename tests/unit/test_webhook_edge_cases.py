@@ -666,39 +666,27 @@ class TestCase26LongTextDirectSave:
     @patch("src.api.webhook.get_session")
     @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
     @patch("src.api.webhook.has_active_session", new_callable=AsyncMock, return_value=False)
-    @patch("src.services.router_service.get_router_service")
-    async def test_short_text_still_uses_router(
-        self, mock_router_svc, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
+    async def test_short_text_classified_as_material(
+        self, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
     ):
-        """2000 字以下仍走 Router。"""
+        """2000 字以下的假名長文 → MATERIAL 分類 → 入庫。"""
         mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
             mock_get_line, mock_session_ctx
         )
-
-        mock_classification = MagicMock()
-        mock_classification.intent = MagicMock()
-        mock_classification.intent.value = "unknown"
-        mock_classification.confidence = 0.3
-        mock_classification.keyword = None
-        # 設定 intent 比較
-        from src.schemas.router import IntentType
-        mock_classification.intent = IntentType.UNKNOWN
-
-        mock_router = MagicMock()
-        mock_router.classify = AsyncMock(return_value=(mock_classification, None))
-        mock_router_svc.return_value = mock_router
 
         with (
             patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
             patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
             patch("src.api.webhook.build_mode_quick_replies", return_value=None),
+            patch("src.api.webhook._save_and_extract", new_callable=AsyncMock, return_value="已入庫") as mock_save_extract,
         ):
+            # "あ"×100 → 有假名 + len>20 → MATERIAL → _save_and_extract
             normal_text = "あ" * 100
             event = _make_message_event(normal_text)
             await handle_message_event(event)
 
-        # Router 應被呼叫
-        mock_router.classify.assert_awaited_once()
+        # 應走 MATERIAL → _save_and_extract
+        mock_save_extract.assert_awaited_once()
 
 
 # ============================================================================

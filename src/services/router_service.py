@@ -40,6 +40,10 @@ class RouterService:
     ) -> tuple[RouterResponse, LLMResponse | None]:
         """Classify user message intent.
 
+        .. deprecated::
+            已被 webhook.py 的 _classify_input() 結構特徵分類取代。
+            保留此方法以維持單元測試相容性，生產程式碼不再呼叫。
+
         Args:
             message: User's message
             context: Optional conversation context
@@ -142,7 +146,12 @@ class RouterService:
         raise ValueError("No JSON found in response")
     
     def _heuristic_classify(self, message: str, target_lang: str = "ja") -> RouterResponse:
-        """依規則啟發式分類使用者意圖（LLM 解析失敗時的 fallback）。"""
+        """依規則啟發式分類使用者意圖（LLM 解析失敗時的 fallback）。
+
+        .. deprecated::
+            已被 webhook.py 的 _classify_input() 結構特徵分類取代。
+            保留此方法以維持單元測試相容性。
+        """
         stripped = message.strip()
         is_single_token = len(stripped.split()) == 1
 
