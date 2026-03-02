@@ -66,8 +66,10 @@ class TestGrading:
         """Test grammar pattern matching."""
         for case in grading_fixtures["grammar_patterns"]["cases"]:
             result = is_correct_answer(case["input"], case["expected"])
-            # Allow some flexibility in grammar matching
-            # The exact result depends on normalizer implementation
+            assert result is case["should_be_correct"], (
+                f"Failed for input={case['input']!r} expected={case['expected']!r}: "
+                f"got {result}, want {case['should_be_correct']}"
+            )
 
 
 class TestNormalizeForCompare:

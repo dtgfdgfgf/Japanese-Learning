@@ -6,8 +6,6 @@ DoD: RouterRequest, RouterResponse schemas 符合 plan.md Router Output
 """
 
 from enum import Enum
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -27,7 +25,7 @@ class RouterRequest(BaseModel):
     """Request to Router for intent classification."""
     
     message: str = Field(..., description="User's message text")
-    context: Optional[str] = Field(
+    context: str | None = Field(
         default=None, 
         description="Optional context from previous messages"
     )
@@ -43,15 +41,15 @@ class RouterResponse(BaseModel):
         le=1.0, 
         description="Confidence score (0-1)"
     )
-    keyword: Optional[str] = Field(
+    keyword: str | None = Field(
         default=None,
         description="Extracted keyword for search intent"
     )
-    reason: Optional[str] = Field(
+    reason: str | None = Field(
         default=None,
         description="Explanation for classification"
     )
-    suggested_response: Optional[str] = Field(
+    suggested_response: str | None = Field(
         default=None,
         description="Suggested response for chat intent"
     )
@@ -72,8 +70,8 @@ class RouterClassification(BaseModel):
     
     intent: str = Field(..., description="Intent string from LLM")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence value")
-    keyword: Optional[str] = Field(default=None)
-    reason: Optional[str] = Field(default=None)
+    keyword: str | None = Field(default=None)
+    reason: str | None = Field(default=None)
     
     def to_response(self) -> RouterResponse:
         """Convert to RouterResponse with validated intent."""

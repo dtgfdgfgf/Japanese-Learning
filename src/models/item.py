@@ -114,11 +114,12 @@ class Item(Base):
         back_populates="items",
         lazy="selectin",
     )
+    # 注意：selectin 會載入已 soft-delete 的子物件，查詢結果需自行過濾
     practice_logs: Mapped[list["PracticeLog"]] = relationship(  # noqa: F821
         "PracticeLog",
         back_populates="item",
         lazy="selectin",
-        cascade="all, delete-orphan",
+        cascade="save-update, merge",
     )
 
     __table_args__ = (
@@ -137,7 +138,8 @@ class Item(Base):
             "confidence >= 0 AND confidence <= 1",
             name="ck_items_confidence_range",
         ),
-        Index("idx_items_user_type_key", "user_id", "item_type", "key"),
+        # 注意：冗餘 index idx_items_user_type_key 已移除
+        # partial unique index uq_items_user_type_key 已涵蓋常用查詢
     )
 
     def __repr__(self) -> str:

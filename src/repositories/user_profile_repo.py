@@ -6,7 +6,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user_profile import UserProfile
@@ -46,7 +46,13 @@ class UserProfileRepository:
         Returns:
             UserProfile（已處理日切重置）
         """
-        profile = await self.session.get(UserProfile, user_id)
+        # 使用 select() 而非 session.get()，確保過濾已 soft-delete 的 profile
+        stmt = select(UserProfile).where(
+            UserProfile.user_id == user_id,
+            UserProfile.is_deleted.is_(False),
+        )
+        result = await self.session.execute(stmt)
+        profile = result.scalar_one_or_none()
 
         if profile is None:
             profile = UserProfile(
@@ -125,13 +131,19 @@ class UserProfileRepository:
         stmt = (
             update(UserProfile)
             .where(UserProfile.user_id == user_id)
+            .where(UserProfile.is_deleted.is_(False))
             .values(daily_used_tokens=UserProfile.daily_used_tokens + delta)
         )
         await self.session.execute(stmt)
         await self.session.flush()
 
-        # 重新讀取最新值
-        profile = await self.session.get(UserProfile, user_id)
+        # 重新讀取最新值（同樣過濾 soft-delete）
+        read_stmt = select(UserProfile).where(
+            UserProfile.user_id == user_id,
+            UserProfile.is_deleted.is_(False),
+        )
+        result = await self.session.execute(read_stmt)
+        profile = result.scalar_one_or_none()
         if profile is None:
             raise ValueError(f"UserProfile not found after token update: {user_id}")
         await self.session.refresh(profile)

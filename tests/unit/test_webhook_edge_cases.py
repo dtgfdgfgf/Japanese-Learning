@@ -740,25 +740,28 @@ class TestCase27NonTextMessage:
 class TestCase28WebhookDedup:
     """Case 28: 重複 webhook event 應被跳過。"""
 
+    @pytest.fixture(autouse=True)
+    def _clean_dedup_state(self):
+        """每個測試前後清理全域 dedup 狀態，避免測試間污染。"""
+        _processed_events.clear()
+        yield
+        _processed_events.clear()
+
     def test_first_event_not_duplicate(self):
         """首次出現的 event ID 不重複。"""
-        _processed_events.clear()
         assert _is_duplicate_event("test_event_001") is False
 
     def test_second_event_is_duplicate(self):
         """相同 event ID 第二次出現為重複。"""
-        _processed_events.clear()
         _is_duplicate_event("test_event_002")
         assert _is_duplicate_event("test_event_002") is True
 
     def test_none_event_id_not_duplicate(self):
         """event_id 為 None 時不視為重複。"""
-        _processed_events.clear()
         assert _is_duplicate_event(None) is False
 
     def test_different_events_not_duplicate(self):
         """不同 event ID 不重複。"""
-        _processed_events.clear()
         _is_duplicate_event("test_event_003")
         assert _is_duplicate_event("test_event_004") is False
 

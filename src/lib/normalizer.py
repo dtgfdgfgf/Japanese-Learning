@@ -68,6 +68,9 @@ def normalize_for_compare(text: str) -> str:
     if any(0x30A0 <= ord(c) <= 0x30FF for c in normalized):
         normalized = jaconv.kata2hira(normalized)
 
+    # 去除文法記號前綴（〜、~），方便 pattern 比對
+    normalized = normalized.lstrip("〜~")
+
     # Lowercase (for romaji and alphabets)
     normalized = normalized.lower()
 

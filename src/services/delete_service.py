@@ -5,6 +5,7 @@ T071: Implement "清空資料" with confirmation state
 """
 
 import logging
+from typing import Any
 
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,22 +88,25 @@ class DeleteService:
         deleted_count = 0
 
         # Soft delete all items
-        items_deleted = await self._soft_delete_all_items(user_id)
+        items_deleted = await self._soft_delete_all(Item, user_id)
         deleted_count += items_deleted
 
         # Soft delete all practice logs
-        practice_logs_deleted = await self._soft_delete_all_practice_logs(user_id)
+        practice_logs_deleted = await self._soft_delete_all(PracticeLog, user_id)
         deleted_count += practice_logs_deleted
 
         # Soft delete all documents
-        docs_deleted = await self._soft_delete_all_docs(user_id)
+        docs_deleted = await self._soft_delete_all(Document, user_id)
         deleted_count += docs_deleted
 
         # Soft delete all raw messages
-        raws_deleted = await self._soft_delete_all_raws(user_id)
+        raws_deleted = await self._soft_delete_all(RawMessage, user_id)
         deleted_count += raws_deleted
 
-        logger.info(f"User {user_id[:8]} cleared all data: {deleted_count} records")
+        logger.info(
+            "User %s cleared all data: %d records",
+            user_id[:8], deleted_count,
+        )
 
         return deleted_count, format_delete_clear_success(
             raws=raws_deleted,
@@ -111,48 +115,12 @@ class DeleteService:
             practice_logs=practice_logs_deleted,
         )
 
-    async def _soft_delete_all_items(self, user_id: str) -> int:
-        """Soft delete all items for user."""
+    async def _soft_delete_all(self, model: type[Any], user_id: str) -> int:
+        """泛型 soft delete：將指定 model 中屬於 user 的記錄標記為已刪除。"""
         stmt = (
-            update(Item)
-            .where(Item.user_id == user_id)
-            .where(Item.is_deleted.is_(False))
-            .values(is_deleted=True)
-        )
-        result = await self.session.execute(stmt)
-        await self.session.flush()
-        return result.rowcount
-
-    async def _soft_delete_all_docs(self, user_id: str) -> int:
-        """Soft delete all documents for user."""
-        stmt = (
-            update(Document)
-            .where(Document.user_id == user_id)
-            .where(Document.is_deleted.is_(False))
-            .values(is_deleted=True)
-        )
-        result = await self.session.execute(stmt)
-        await self.session.flush()
-        return result.rowcount
-
-    async def _soft_delete_all_practice_logs(self, user_id: str) -> int:
-        """Soft delete all practice logs for user."""
-        stmt = (
-            update(PracticeLog)
-            .where(PracticeLog.user_id == user_id)
-            .where(PracticeLog.is_deleted.is_(False))
-            .values(is_deleted=True)
-        )
-        result = await self.session.execute(stmt)
-        await self.session.flush()
-        return result.rowcount
-
-    async def _soft_delete_all_raws(self, user_id: str) -> int:
-        """Soft delete all raw messages for user."""
-        stmt = (
-            update(RawMessage)
-            .where(RawMessage.user_id == user_id)
-            .where(RawMessage.is_deleted.is_(False))
+            update(model)
+            .where(model.user_id == user_id)
+            .where(model.is_deleted.is_(False))
             .values(is_deleted=True)
         )
         result = await self.session.execute(stmt)

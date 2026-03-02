@@ -6,7 +6,7 @@ DoD: 可 create/get practice_log；get_by_item 回傳該 item 的練習紀錄
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Integer, func, select
+from sqlalchemy import Float, Integer, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.practice_log import PracticeLog
@@ -181,29 +181,22 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
         # Subquery to calculate error rate per item
+        # 使用 Float cast 避免 PostgreSQL 整數除法截斷（1/2=0 而非 0.5）
+        error_rate_expr = (
+            func.cast(func.sum(func.cast(~PracticeLog.is_correct, Integer)), Float)
+            / func.count()
+        )
         stmt = (
             select(
                 PracticeLog.item_id,
-                (
-                    func.sum(func.cast(~PracticeLog.is_correct, Integer))
-                    / func.count()
-                ).label("error_rate"),
+                error_rate_expr.label("error_rate"),
             )
             .where(PracticeLog.user_id == user_id)
             .where(PracticeLog.is_deleted.is_(False))
             .where(PracticeLog.created_at >= cutoff)
             .group_by(PracticeLog.item_id)
-            .having(
-                func.sum(func.cast(~PracticeLog.is_correct, Integer))
-                / func.count()
-                >= threshold
-            )
-            .order_by(
-                (
-                    func.sum(func.cast(~PracticeLog.is_correct, Integer))
-                    / func.count()
-                ).desc()
-            )
+            .having(error_rate_expr >= threshold)
+            .order_by(error_rate_expr.desc())
             .limit(limit)
         )
 

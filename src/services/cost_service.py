@@ -10,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.lib.llm_client import MODE_MODEL_MAP
-from src.lib.security import hash_user_id
 from src.repositories.api_usage_log_repo import ApiUsageLogRepository, UsageSummary
 from src.schemas.command import CommandResult
 from src.templates.messages import format_cost_summary
@@ -106,17 +105,16 @@ class CostService:
 
     async def get_usage_summary(
         self,
-        line_user_id: str,
+        user_id: str,
     ) -> CommandResult:
         """取得使用者的 API 用量摘要。
 
         Args:
-            line_user_id: 原始 LINE user ID (會被 hash)
+            user_id: Hashed LINE user ID
 
         Returns:
             CommandResult 包含格式化的用量摘要
         """
-        user_id = hash_user_id(line_user_id)
 
         # 取得本月起始時間
         now = datetime.now(timezone.utc)

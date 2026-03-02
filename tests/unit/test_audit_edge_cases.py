@@ -581,15 +581,16 @@ class TestCostEdgeCases:
         assert result == Messages.ERROR_COST
 
     async def test_line_user_id_passed_correctly(self) -> None:
-        """原始 line_user_id 傳遞給 service（service 內部負責 hash）。"""
+        """webhook 先 hash 再傳給 service（service 接收 hashed ID）。"""
         mock_service = MagicMock()
         mock_service.get_usage_summary = AsyncMock(return_value=MagicMock(message="ok"))
         with (
             patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
             patch("src.services.cost_service.CostService", return_value=mock_service),
+            patch("src.api.webhook.hash_user_id", return_value="hashed_uid"),
         ):
             await _handle_cost("Uoriginal_line_id")
-        mock_service.get_usage_summary.assert_awaited_once_with("Uoriginal_line_id")
+        mock_service.get_usage_summary.assert_awaited_once_with("hashed_uid")
 
     async def test_empty_result_message(self) -> None:
         """無用量紀錄 → service 回傳的空結果訊息仍正常顯示。"""
@@ -651,15 +652,16 @@ class TestStatsEdgeCases:
         assert result == Messages.ERROR_STATS
 
     async def test_line_user_id_passed_correctly(self) -> None:
-        """原始 line_user_id 傳遞給 service。"""
+        """webhook 先 hash 再傳給 service（service 接收 hashed ID）。"""
         mock_service = MagicMock()
         mock_service.get_stats_summary = AsyncMock(return_value=MagicMock(message="ok"))
         with (
             patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
             patch("src.services.stats_service.StatsService", return_value=mock_service),
+            patch("src.api.webhook.hash_user_id", return_value="hashed_uid"),
         ):
             await _handle_stats("Uline_456")
-        mock_service.get_stats_summary.assert_awaited_once_with("Uline_456")
+        mock_service.get_stats_summary.assert_awaited_once_with("hashed_uid")
 
     async def test_empty_stats_message(self) -> None:
         """新使用者無資料 → 回傳空結果訊息。"""

@@ -7,7 +7,7 @@ DoD: PracticeQuestion, PracticeSession schemas 定義完整；支援 vocab_recal
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -49,7 +49,7 @@ class PracticeQuestion(BaseModel):
         default_factory=list,
         description="Optional hints for the question"
     )
-    source_context: Optional[str] = Field(
+    source_context: str | None = Field(
         None,
         description="Original context where this item appeared"
     )
@@ -105,7 +105,7 @@ class PracticeSession(BaseModel):
         return len(self.questions)
     
     @property
-    def current_question(self) -> Optional[PracticeQuestion]:
+    def current_question(self) -> PracticeQuestion | None:
         """Get current question."""
         if self.current_index < len(self.questions):
             return self.questions[self.current_index]
@@ -153,7 +153,7 @@ class PracticeAnswer(BaseModel):
     user_answer: str = Field(..., description="User's answer")
     is_correct: bool = Field(..., description="Whether answer is correct")
     expected_answer: str = Field(..., description="Expected answer")
-    feedback: Optional[str] = Field(None, description="Feedback message")
+    feedback: str | None = Field(None, description="Feedback message")
     
     def format_feedback_message(self) -> str:
         """Format feedback for LINE message.

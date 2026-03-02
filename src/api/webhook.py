@@ -230,6 +230,7 @@ def _is_likely_romaji(text: str, target_lang: str) -> bool:
 
 # Edge Case 19: per-user lock，確保同一用戶的背景訊息依序處理
 # 使用 OrderedDict 實作 LRU，限制最大數量避免記憶體洩漏
+# ⚠️ 假設單 worker 部署：in-memory lock 不跨 process 共享
 _MAX_USER_LOCKS = 1000
 _user_locks: dict[str, asyncio.Lock] = {}
 
@@ -237,6 +238,7 @@ _user_locks: dict[str, asyncio.Lock] = {}
 _background_tasks: set[asyncio.Task[None]] = set()
 
 # Edge Case 28: Webhook 去重（in-memory TTL set）
+# ⚠️ 假設單 worker 部署：in-memory dedup 不跨 process 共享
 _processed_events: dict[str, float] = {}  # {webhook_event_id: timestamp}
 _EVENT_DEDUP_TTL = 60  # 60 秒內的重複事件視為 retry
 _MAX_DEDUP_EVENTS = 10000  # dedup dict 最大條目數
@@ -959,13 +961,14 @@ async def _handle_practice(line_user_id: str, mode: str = "free", target_lang: s
 
 async def _handle_cost(line_user_id: str) -> str:
     """處理用量查詢指令。"""
+    hashed_uid = hash_user_id(line_user_id)
     async with get_session() as session:
         from src.services.cost_service import CostService
 
         cost_service = CostService(session)
 
         try:
-            result = await cost_service.get_usage_summary(line_user_id)
+            result = await cost_service.get_usage_summary(hashed_uid)
             return result.message
         except Exception as e:
             logger.error(f"Cost query failed: {e}")
@@ -974,13 +977,14 @@ async def _handle_cost(line_user_id: str) -> str:
 
 async def _handle_stats(line_user_id: str) -> str:
     """處理統計指令。"""
+    hashed_uid = hash_user_id(line_user_id)
     async with get_session() as session:
         from src.services.stats_service import StatsService
 
         stats_service = StatsService(session)
 
         try:
-            result = await stats_service.get_stats_summary(line_user_id)
+            result = await stats_service.get_stats_summary(hashed_uid)
             return result.message
         except Exception as e:
             logger.error(f"Stats query failed: {e}")
@@ -1007,7 +1011,7 @@ async def _handle_list_items(line_user_id: str, keyword: str | None) -> str:
             items = await item_repo.get_by_user(
                 user_id=hashed_user_id,
                 item_type=type_filter,
-                limit=10000,
+                limit=200,
             )
 
             if not items:
@@ -1287,9 +1291,11 @@ async def _handle_unknown(
             if db_items:
                 return _format_search_results(db_items)
             try:
-                display, extracted_item = await router_service.get_word_explanation_structured(
+                display, extracted_item, word_trace = await router_service.get_word_explanation_structured(
                     word, mode=mode, target_lang=target_lang
                 )
+                if word_trace:
+                    llm_traces.append((word_trace, "word_explanation"))
             except Exception:
                 return Messages.ERROR_API_CALL
             async with get_session() as session:
@@ -1323,9 +1329,11 @@ async def _handle_unknown(
                     return _format_search_results(db_items)
                 # DB 無紀錄：LLM 解釋 + 詢問入庫
                 try:
-                    display, extracted_item = await router_service.get_word_explanation_structured(
+                    display, extracted_item, word_trace = await router_service.get_word_explanation_structured(
                         word, mode=mode, target_lang=target_lang
                     )
+                    if word_trace:
+                        llm_traces.append((word_trace, "word_explanation"))
                 except Exception:
                     return Messages.ERROR_API_CALL
                 async with get_session() as session:
@@ -1347,9 +1355,11 @@ async def _handle_unknown(
                     # 處理第一個單字，提示其餘逐一輸入
                     first_word = tokens[0]
                     try:
-                        display, extracted_item = await router_service.get_word_explanation_structured(
+                        display, extracted_item, word_trace = await router_service.get_word_explanation_structured(
                             first_word, mode=mode, target_lang=target_lang
                         )
+                        if word_trace:
+                            llm_traces.append((word_trace, "word_explanation"))
                     except Exception:
                         return Messages.ERROR_API_CALL
                     async with get_session() as session:
@@ -1390,9 +1400,11 @@ async def _handle_unknown(
             keyword = classification.keyword
             if _is_single_word(keyword, target_lang):
                 try:
-                    display, extracted_item = await router_service.get_word_explanation_structured(
+                    display, extracted_item, word_trace = await router_service.get_word_explanation_structured(
                         keyword, mode=mode, target_lang=target_lang
                     )
+                    if word_trace:
+                        llm_traces.append((word_trace, "word_explanation"))
                 except Exception:
                     return Messages.ERROR_API_CALL
                 async with get_session() as session:

@@ -180,7 +180,7 @@ class TestSaveIntentShortWordDbMiss:
             )
         )
         mock_router.get_word_explanation_structured = AsyncMock(
-            return_value=("FIT 的意思是...", _SAMPLE_EXTRACTED_ITEM)
+            return_value=("FIT 的意思是...", _SAMPLE_EXTRACTED_ITEM, None)
         )
         mock_get_router.return_value = mock_router
 
@@ -238,7 +238,7 @@ class TestSaveIntentShortWordDbMiss:
         )
         # item 為 None（JSON parse 失敗的 fallback 情境）
         mock_router.get_word_explanation_structured = AsyncMock(
-            return_value=("FIT 的意思是...", None)
+            return_value=("FIT 的意思是...", None, None)
         )
         mock_get_router.return_value = mock_router
 
@@ -301,7 +301,7 @@ class TestSearchIntentSingleWordDbMiss:
             )
         )
         mock_router.get_word_explanation_structured = AsyncMock(
-            return_value=("FIT 表示適合", _SAMPLE_EXTRACTED_ITEM)
+            return_value=("FIT 表示適合", _SAMPLE_EXTRACTED_ITEM, None)
         )
         mock_get_router.return_value = mock_router
 

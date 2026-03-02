@@ -86,8 +86,9 @@ class UserProfile(Base):
     )
 
     def __repr__(self) -> str:
+        uid = self.user_id[:8] if self.user_id else None
         return (
-            f"<UserProfile(user_id={self.user_id!r}, "
+            f"<UserProfile(user_id={uid!r}..., "
             f"mode={self.mode!r}, "
             f"daily_used={self.daily_used_tokens}/{self.daily_cap_tokens_free})>"
         )

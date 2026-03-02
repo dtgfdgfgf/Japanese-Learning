@@ -107,10 +107,10 @@ class LLMClient:
     """
 
     Features:
-    - Anthropic Claude as primary provider
-    - Automatic retry logic
+    - Mode-based provider selection (Anthropic Claude / Google Gemini)
     - Structured JSON output support
     - Trace logging for monitoring
+    - Request-level token accumulation via UsageContext
     """
 
     # Model configurations
@@ -205,6 +205,7 @@ class LLMClient:
         config_kwargs: dict[str, Any] = {
             "system_instruction": system_prompt,
             "temperature": temperature,
+            "max_output_tokens": self.ANTHROPIC_MAX_TOKENS,  # 與 Anthropic 一致的 output 上限
         }
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
@@ -251,7 +252,7 @@ class LLMClient:
         provider = mapping["provider"]
         model = mapping["model"]
 
-        start_time = time.time()
+        start_time = time.monotonic()
 
         response = await self._call_provider(
             provider=provider,
@@ -262,7 +263,7 @@ class LLMClient:
             json_mode=json_mode,
             timeout=timeout,
         )
-        latency_ms = int((time.time() - start_time) * 1000)
+        latency_ms = int((time.monotonic() - start_time) * 1000)
         resp = LLMResponse(
             content=response["content"],
             model=model,
@@ -373,4 +374,10 @@ async def close_llm_client() -> None:
     global _llm_client
     if _llm_client is not None:
         await _llm_client.anthropic_client.close()
+        # 關閉 Gemini client，釋放底層 HTTP connection pool
+        if _llm_client._gemini_client is not None:
+            try:
+                await _llm_client._gemini_client.aio.close()
+            except Exception:
+                pass  # Gemini SDK 關閉失敗不影響 shutdown
         _llm_client = None

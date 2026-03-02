@@ -5,8 +5,6 @@ T035: Create Pydantic schemas for Extractor
 DoD: ExtractorRequest, ExtractorResponse, ExtractedItem schemas 符合 plan.md Extractor Output
 """
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -22,47 +20,47 @@ class ExtractedItem(BaseModel):
         ...,
         description="Unique key for the item, e.g., 'vocab:考える' or 'grammar:〜てしまう'"
     )
-    surface: Optional[str] = Field(
+    surface: str | None = Field(
         None,
         description="Surface form for vocab items (e.g., '考える')"
     )
-    reading: Optional[str] = Field(
+    reading: str | None = Field(
         None,
         description="Reading in hiragana (e.g., 'かんがえる') — 日文用"
     )
-    pronunciation: Optional[str] = Field(
+    pronunciation: str | None = Field(
         None,
         description="IPA pronunciation (e.g., '/kənˈsɪdər/') — 英文用"
     )
-    pos: Optional[str] = Field(
+    pos: str | None = Field(
         None,
         description="Part of speech (e.g., 'verb', 'noun', 'i-adjective')"
     )
-    glossary_zh: Optional[list[str]] = Field(
+    glossary_zh: list[str] | None = Field(
         None,
         description="Chinese glossary translations"
     )
-    pattern: Optional[str] = Field(
+    pattern: str | None = Field(
         None,
         description="Grammar pattern (e.g., '〜てしまう')"
     )
-    meaning_zh: Optional[str] = Field(
+    meaning_zh: str | None = Field(
         None,
         description="Chinese meaning for grammar items"
     )
-    form_notes: Optional[str] = Field(
+    form_notes: str | None = Field(
         None,
         description="Formation notes (e.g., 'Vて + しまう')"
     )
-    example: Optional[str] = Field(
+    example: str | None = Field(
         None,
         description="Example sentence"
     )
-    example_translation: Optional[str] = Field(
+    example_translation: str | None = Field(
         None,
         description="Example sentence translation"
     )
-    source_quote: Optional[str] = Field(
+    source_quote: str | None = Field(
         None,
         description="Original text quote this item was extracted from"
     )
@@ -110,7 +108,7 @@ class ExtractorRequest(BaseModel):
         le=50,
         description="Maximum number of items to extract"
     )
-    lang_hint: Optional[str] = Field(
+    lang_hint: str | None = Field(
         default=None,
         description="Language hint (e.g., 'ja')"
     )

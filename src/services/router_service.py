@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from src.lib.llm_client import LLMResponse, get_llm_client
+from src.lib.llm_client import LLMResponse, LLMTrace, get_llm_client
 from src.prompts.router import format_router_request, get_system_prompt
 from src.schemas.router import IntentType, RouterClassification, RouterResponse
 
@@ -321,7 +321,7 @@ class RouterService:
         word: str,
         mode: str = "free",
         target_lang: str = "ja",
-    ) -> tuple[str, dict[str, Any] | None]:
+    ) -> tuple[str, dict[str, Any] | None, LLMTrace | None]:
         """取得單字解釋並同時回傳結構化 item 資料。
 
         一次 LLM 呼叫同時回傳使用者友善的解釋和結構化 ExtractedItem 欄位，
@@ -333,9 +333,10 @@ class RouterService:
             target_lang: 目標語言 (ja/en)
 
         Returns:
-            (display_text, extracted_item_dict | None)
+            (display_text, extracted_item_dict | None, llm_trace | None)
             - display_text: 使用者友善的 markdown 解釋
             - extracted_item_dict: 結構化 item 資料（JSON parse 失敗時為 None）
+            - llm_trace: LLM 呼叫追蹤資訊（用於記錄到 api_usage_logs）
         """
         if target_lang == "ja":
             system_prompt = """你是一個專業的日語老師。請用 JSON 格式回傳以下兩個欄位：
@@ -389,7 +390,7 @@ class RouterService:
 回覆必須是合法 JSON。"""
 
         try:
-            response_data, _ = await self.llm_client.complete_json_with_mode(
+            response_data, trace = await self.llm_client.complete_json_with_mode(
                 mode=mode,
                 system_prompt=system_prompt,
                 user_message=word,
@@ -402,7 +403,7 @@ class RouterService:
             if not display:
                 # JSON 成功但 display 為空，不應發生但做防禦
                 logger.warning("Structured word explanation returned empty display")
-                return word, item_data
+                return word, item_data, trace
 
             # 組裝 extracted_item_dict（與 ExtractedItem schema 相容）
             extracted_item: dict[str, Any] | None = None
@@ -422,13 +423,13 @@ class RouterService:
                 else:
                     extracted_item["pronunciation"] = item_data.get("pronunciation")
 
-            return display, extracted_item
+            return display, extracted_item, trace
 
         except Exception as e:
             logger.warning(f"Structured word explanation failed, falling back: {e}")
             # Fallback：呼叫原版 get_word_explanation
             resp = await self.get_word_explanation(word, mode=mode, target_lang=target_lang)
-            return resp.content, None
+            return resp.content, None, resp.to_trace()
 
 
 # 模組層級 singleton

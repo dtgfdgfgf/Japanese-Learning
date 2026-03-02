@@ -99,16 +99,17 @@ class ApiUsageLog(Base):
     )
 
     # 索引：加速使用者用量查詢
+    # composite index (user_id, created_at) 已涵蓋 user_id 單欄查詢（左前綴）
     __table_args__ = (
-        Index("ix_api_usage_logs_user_id", "user_id"),
         Index("ix_api_usage_logs_created_at", "created_at"),
         Index("ix_api_usage_logs_user_created", "user_id", "created_at"),
     )
 
     def __repr__(self) -> str:
+        uid = self.user_id[:8] if self.user_id else None
         return (
             f"<ApiUsageLog(log_id={self.log_id!r}, "
-            f"user_id={self.user_id!r}, "
+            f"user_id={uid!r}..., "
             f"model={self.model!r}, "
             f"cost_usd={self.cost_usd})>"
         )

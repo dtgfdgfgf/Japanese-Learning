@@ -193,10 +193,8 @@ class TestClearAllData:
     async def test_clear_all_data_includes_practice_logs(self, mock_session):
         """清空資料需包含練習紀錄並反映在回傳訊息。"""
         service = DeleteService(mock_session)
-        service._soft_delete_all_items = AsyncMock(return_value=3)
-        service._soft_delete_all_practice_logs = AsyncMock(return_value=4)
-        service._soft_delete_all_docs = AsyncMock(return_value=2)
-        service._soft_delete_all_raws = AsyncMock(return_value=1)
+        # _soft_delete_all 依序呼叫：Item(3), PracticeLog(4), Document(2), RawMessage(1)
+        service._soft_delete_all = AsyncMock(side_effect=[3, 4, 2, 1])
 
         deleted_count, message = await service.clear_all_data("test_user_hash")
 

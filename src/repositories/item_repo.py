@@ -454,6 +454,25 @@ class ItemRepository(BaseRepository[Item]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_by_ids(self, item_ids: list[str]) -> list[Item]:
+        """批次取得多個 item（避免 N+1 查詢）。
+
+        Args:
+            item_ids: Item ID 列表
+
+        Returns:
+            List of Item instances（僅回傳未刪除的）
+        """
+        if not item_ids:
+            return []
+        stmt = (
+            select(Item)
+            .where(Item.item_id.in_(item_ids))
+            .where(Item.is_deleted.is_(False))
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def upsert(
         self,
         user_id: str,

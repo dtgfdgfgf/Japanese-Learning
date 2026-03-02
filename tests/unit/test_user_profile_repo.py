@@ -35,7 +35,15 @@ def _make_profile(
     p.reset_at = reset_at or (_next_reset_at())
     p.created_at = datetime.now(timezone.utc)
     p.updated_at = datetime.now(timezone.utc)
+    p.is_deleted = False
     return p
+
+
+def _mock_scalar_result(value: object) -> MagicMock:
+    """建立 session.execute() 回傳的 Result mock，支援 .scalar_one_or_none()。"""
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = value
+    return result
 
 
 # ============================================================================
@@ -73,7 +81,7 @@ class TestGetOrCreate:
     async def test_creates_new_profile(self):
         """使用者不存在時應建立新 profile。"""
         session = AsyncMock()
-        session.get = AsyncMock(return_value=None)
+        session.execute = AsyncMock(return_value=_mock_scalar_result(None))
         session.add = MagicMock()
         session.flush = AsyncMock()
 
@@ -95,7 +103,7 @@ class TestGetOrCreate:
             daily_used=1000,
         )
         session = AsyncMock()
-        session.get = AsyncMock(return_value=existing)
+        session.execute = AsyncMock(return_value=_mock_scalar_result(existing))
         session.flush = AsyncMock()
 
         repo = UserProfileRepository(session)
@@ -110,7 +118,7 @@ class TestGetOrCreate:
         existing = _make_profile(reset_at=past, daily_used=30000)
 
         session = AsyncMock()
-        session.get = AsyncMock(return_value=existing)
+        session.execute = AsyncMock(return_value=_mock_scalar_result(existing))
         session.flush = AsyncMock()
 
         repo = UserProfileRepository(session)
@@ -138,7 +146,7 @@ class TestSetMode:
             reset_at=datetime.now(timezone.utc) + timedelta(hours=12),
         )
         session = AsyncMock()
-        session.get = AsyncMock(return_value=existing)
+        session.execute = AsyncMock(return_value=_mock_scalar_result(existing))
         session.flush = AsyncMock()
 
         repo = UserProfileRepository(session)
@@ -154,7 +162,7 @@ class TestSetMode:
             reset_at=datetime.now(timezone.utc) + timedelta(hours=12),
         )
         session = AsyncMock()
-        session.get = AsyncMock(return_value=existing)
+        session.execute = AsyncMock(return_value=_mock_scalar_result(existing))
         session.flush = AsyncMock()
 
         repo = UserProfileRepository(session)
@@ -176,15 +184,17 @@ class TestAddTokens:
         """add_tokens 應執行 SQL 原子更新並回傳更新後的 profile。"""
         updated_profile = _make_profile(daily_used=500)
 
+        # execute 被呼叫兩次：第一次 UPDATE，第二次 SELECT
+        update_result = MagicMock()  # UPDATE 不需 scalar
+        select_result = _mock_scalar_result(updated_profile)
         session = AsyncMock()
-        session.execute = AsyncMock()
+        session.execute = AsyncMock(side_effect=[update_result, select_result])
         session.flush = AsyncMock()
-        session.get = AsyncMock(return_value=updated_profile)
         session.refresh = AsyncMock()
 
         repo = UserProfileRepository(session)
         result = await repo.add_tokens("hashed_user", 500)
 
         assert result.daily_used_tokens == 500
-        session.execute.assert_awaited_once()
+        assert session.execute.await_count == 2
         session.refresh.assert_awaited_once()

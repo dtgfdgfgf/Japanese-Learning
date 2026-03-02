@@ -62,9 +62,9 @@ class Settings(BaseSettings):
         default=50000, ge=0, description="Daily free token cap per user"
     )
 
-    # Rate Limiting
+    # Rate Limiting（預留設定，目前尚未在執行層強制限制）
     llm_rate_limit_per_minute: int = Field(
-        default=10, ge=1, le=100, description="LLM calls per minute per user"
+        default=10, ge=1, le=100, description="LLM calls per minute per user (未實作)"
     )
 
     # LLM Settings

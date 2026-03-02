@@ -60,6 +60,9 @@ class LineClient:
             access_token=self.channel_access_token,
         )
         self.parser = WebhookParser(self.channel_secret)
+        # 重用 ApiClient 避免每次呼叫都建立新的 HTTP 連線
+        self._api_client = ApiClient(self.configuration)
+        self._messaging_api = MessagingApi(self._api_client)
 
     def verify_signature(self, body: str, signature: str) -> bool:
         """Verify LINE webhook signature.
@@ -100,21 +103,17 @@ class LineClient:
             True if message was sent successfully, False otherwise
         """
         try:
-            def _sync_reply() -> None:
-                with ApiClient(self.configuration) as api_client:
-                    api = MessagingApi(api_client)
-                    api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=reply_token,
-                            messages=[TextMessage(text=text)],
-                        )
-                    )
-
-            await asyncio.to_thread(_sync_reply)
-            logger.debug(f"Sent reply: {text[:50]}...")
+            await asyncio.to_thread(
+                self._messaging_api.reply_message,
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[TextMessage(text=text)],
+                ),
+            )
+            logger.debug("Sent reply: %s...", text[:50])
             return True
         except Exception as e:
-            logger.error(f"Failed to send LINE reply: {e}")
+            logger.error("Failed to send LINE reply: %s", e)
             return False
 
     async def reply_messages(
@@ -138,21 +137,17 @@ class LineClient:
         texts = texts[:5]
 
         try:
-            def _sync_reply() -> None:
-                with ApiClient(self.configuration) as api_client:
-                    api = MessagingApi(api_client)
-                    api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=reply_token,
-                            messages=[TextMessage(text=t) for t in texts],
-                        )
-                    )
-
-            await asyncio.to_thread(_sync_reply)
-            logger.debug(f"Sent {len(texts)} replies")
+            await asyncio.to_thread(
+                self._messaging_api.reply_message,
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[TextMessage(text=t) for t in texts],
+                ),
+            )
+            logger.debug("Sent %d replies", len(texts))
             return True
         except Exception as e:
-            logger.error(f"Failed to send LINE replies: {e}")
+            logger.error("Failed to send LINE replies: %s", e)
             return False
 
     def parse_events(self, body: str, signature: str) -> list[Any]:
@@ -213,23 +208,19 @@ class LineClient:
             True if sent successfully
         """
         try:
-            def _sync_reply() -> None:
-                with ApiClient(self.configuration) as api_client:
-                    api = MessagingApi(api_client)
-                    api.reply_message(
-                        ReplyMessageRequest(
-                            reply_token=reply_token,
-                            messages=[
-                                TextMessage(text=text, quick_reply=quick_reply),
-                            ],
-                        )
-                    )
-
-            await asyncio.to_thread(_sync_reply)
-            logger.debug(f"Sent reply with quick_reply: {text[:50]}...")
+            await asyncio.to_thread(
+                self._messaging_api.reply_message,
+                ReplyMessageRequest(
+                    reply_token=reply_token,
+                    messages=[
+                        TextMessage(text=text, quick_reply=quick_reply),
+                    ],
+                ),
+            )
+            logger.debug("Sent reply with quick_reply: %s...", text[:50])
             return True
         except Exception as e:
-            logger.error(f"Failed to send LINE reply with quick_reply: {e}")
+            logger.error("Failed to send LINE reply with quick_reply: %s", e)
             return False
 
     async def push_message(
@@ -247,21 +238,17 @@ class LineClient:
             True if sent successfully
         """
         try:
-            def _sync_push() -> None:
-                with ApiClient(self.configuration) as api_client:
-                    api = MessagingApi(api_client)
-                    api.push_message(
-                        PushMessageRequest(
-                            to=user_id,
-                            messages=[TextMessage(text=text)],
-                        )
-                    )
-
-            await asyncio.to_thread(_sync_push)
-            logger.debug(f"Pushed message: {text[:50]}...")
+            await asyncio.to_thread(
+                self._messaging_api.push_message,
+                PushMessageRequest(
+                    to=user_id,
+                    messages=[TextMessage(text=text)],
+                ),
+            )
+            logger.debug("Pushed message: %s...", text[:50])
             return True
         except Exception as e:
-            logger.error(f"Failed to push LINE message: {e}")
+            logger.error("Failed to push LINE message: %s", e)
             return False
 
     async def push_message_with_quick_reply(
@@ -281,23 +268,19 @@ class LineClient:
             True if sent successfully
         """
         try:
-            def _sync_push() -> None:
-                with ApiClient(self.configuration) as api_client:
-                    api = MessagingApi(api_client)
-                    api.push_message(
-                        PushMessageRequest(
-                            to=user_id,
-                            messages=[
-                                TextMessage(text=text, quick_reply=quick_reply),
-                            ],
-                        )
-                    )
-
-            await asyncio.to_thread(_sync_push)
-            logger.debug(f"Pushed message with quick_reply: {text[:50]}...")
+            await asyncio.to_thread(
+                self._messaging_api.push_message,
+                PushMessageRequest(
+                    to=user_id,
+                    messages=[
+                        TextMessage(text=text, quick_reply=quick_reply),
+                    ],
+                ),
+            )
+            logger.debug("Pushed message with quick_reply: %s...", text[:50])
             return True
         except Exception as e:
-            logger.error(f"Failed to push LINE message with quick_reply: {e}")
+            logger.error("Failed to push LINE message with quick_reply: %s", e)
             return False
 
     def get_reply_token(self, event: MessageEvent) -> str | None:

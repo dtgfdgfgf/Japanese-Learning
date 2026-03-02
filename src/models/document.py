@@ -125,11 +125,12 @@ class Document(Base):
         back_populates="document",
         lazy="selectin",
     )
+    # 注意：selectin 會載入已 soft-delete 的子物件，查詢結果需自行過濾
     items: Mapped[list["Item"]] = relationship(  # noqa: F821
         "Item",
         back_populates="document",
         lazy="selectin",
-        cascade="all, delete-orphan",
+        cascade="save-update, merge",
     )
 
     __table_args__ = (

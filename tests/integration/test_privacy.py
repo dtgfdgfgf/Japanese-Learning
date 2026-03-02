@@ -14,7 +14,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from src.main import app
-from src.services.command_service import get_privacy_message
+from src.templates.messages import Messages
 from tests.conftest import create_message_event
 
 
@@ -81,35 +81,35 @@ class TestPrivacyContent:
     
     def test_privacy_contains_data_storage_info(self):
         """Test privacy message mentions data storage."""
-        message = get_privacy_message()
+        message = Messages.PRIVACY
         
         # Should mention data storage
         assert any(term in message for term in ["資料保存", "保存", "儲存", "資料"])
     
     def test_privacy_contains_ai_usage_info(self):
         """Test privacy message mentions AI usage."""
-        message = get_privacy_message()
+        message = Messages.PRIVACY
         
         # Should mention AI usage
         assert any(term in message for term in ["AI", "AI 使用", "人工智慧"])
     
     def test_privacy_contains_deletion_info(self):
         """Test privacy message mentions data deletion."""
-        message = get_privacy_message()
+        message = Messages.PRIVACY
         
         # Should mention how to delete data
         assert any(term in message for term in ["刪除", "刪除最後一筆", "清空資料"])
     
     def test_privacy_contains_user_id_handling(self):
         """Test privacy message mentions user ID handling."""
-        message = get_privacy_message()
+        message = Messages.PRIVACY
         
         # Should mention LINE ID or user ID handling
         assert any(term in message for term in ["LINE ID", "ID", "雜湊", "加密"])
     
     def test_privacy_length_within_line_limit(self):
         """Test privacy message doesn't exceed LINE message limit."""
-        message = get_privacy_message()
+        message = Messages.PRIVACY
         
         # LINE text message limit is 5000 characters
         # But for readability, should be much shorter
@@ -117,7 +117,7 @@ class TestPrivacyContent:
     
     def test_privacy_has_clear_formatting(self):
         """Test privacy message has clear formatting."""
-        message = get_privacy_message()
+        message = Messages.PRIVACY
         
         # Should have some structure (bullet points, sections, etc.)
         assert any(char in message for char in ["•", "📦", "🤖", "🗑️", ":", "："])

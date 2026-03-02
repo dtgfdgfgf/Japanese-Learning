@@ -77,6 +77,10 @@ class ExtractorService:
         if not document:
             raise ValueError(f"Document not found: {doc_id}")
 
+        # 驗證 document 所有權，防止越權存取
+        if document.user_id != user_id:
+            raise ValueError(f"Document access denied: {doc_id}")
+
         if document.parse_status == "parsed":
             logger.warning(f"Document {doc_id} already parsed")
             return ExtractorResponse(

@@ -21,6 +21,7 @@ from src.lib.llm_client import get_llm_client
 from src.lib.normalizer import is_correct_answer, kanji_to_reading_variants, normalize_for_compare
 from src.models.item import Item
 from src.prompts.grader import GRADER_SYSTEM_PROMPT, format_grader_request
+from src.repositories.api_usage_log_repo import ApiUsageLogRepository
 from src.repositories.item_repo import ItemRepository
 from src.repositories.practice_log_repo import PracticeLogRepository
 from src.schemas.practice import (
@@ -62,6 +63,7 @@ class PracticeService:
         self.target_lang = target_lang
         self.item_repo = ItemRepository(session)
         self.practice_log_repo = PracticeLogRepository(session)
+        self.usage_repo = ApiUsageLogRepository(session)
         self.session_service = SessionService(session)
         self.llm_client = get_llm_client()
 
@@ -207,20 +209,14 @@ class PracticeService:
         min_rate: float,
     ) -> list[Item]:
         """Get items with high error rate."""
-        items_with_errors = await self.practice_log_repo.get_items_with_high_error_rate(
+        item_ids = await self.practice_log_repo.get_items_with_high_error_rate(
             user_id=user_id,
             days=days,
             threshold=min_rate,
             limit=limit,
         )
-
-        items = []
-        for item_id in items_with_errors:
-            item = await self.item_repo.get_by_id(item_id)
-            if item:
-                items.append(item)
-
-        return items
+        # 批次查詢取代逐筆 get_by_id，避免 N+1
+        return await self.item_repo.get_by_ids(item_ids)
 
     async def _get_stale_items(
         self,
@@ -447,10 +443,20 @@ class PracticeService:
 
         # Grade answer — GRAMMAR_USAGE 使用模糊判定（答案需包含 pattern）
         if current_question.practice_type == PracticeType.GRAMMAR_USAGE:
-            is_correct = (
-                normalize_for_compare(current_question.expected_answer)
-                in normalize_for_compare(answer_text)
-            )
+            norm_pattern = normalize_for_compare(current_question.expected_answer)
+            norm_answer = normalize_for_compare(answer_text)
+            # 短 pattern（≤2 字元，如「は」「が」）幾乎出現在任何句子中，
+            # 直接交給 LLM 語義判定避免 false positive
+            if len(norm_pattern) <= 2:
+                is_correct = await self._llm_grade_answer(
+                    user_answer=answer_text,
+                    expected_answer=current_question.expected_answer,
+                    accepted_answers=[current_question.expected_answer],
+                    question_context=current_question.prompt,
+                    user_id=user_id,
+                )
+            else:
+                is_correct = norm_pattern in norm_answer
         else:
             # Phase 1：嚴格匹配（含 accepted_answers）
             grading_answers = (
@@ -467,6 +473,7 @@ class PracticeService:
                     expected_answer=current_question.expected_answer,
                     accepted_answers=grading_answers,
                     question_context=current_question.prompt,
+                    user_id=user_id,
                 )
 
         # Create answer record
@@ -523,6 +530,7 @@ class PracticeService:
         expected_answer: str,
         accepted_answers: list[str],
         question_context: str,
+        user_id: str | None = None,
     ) -> bool:
         """Phase 2：LLM 語義判定 fallback。
 
@@ -536,13 +544,22 @@ class PracticeService:
                 accepted_answers=accepted_answers,
                 question_context=question_context,
             )
-            parsed, _trace = await self.llm_client.complete_json_with_mode(
+            parsed, trace = await self.llm_client.complete_json_with_mode(
                 mode=self.mode,
                 system_prompt=GRADER_SYSTEM_PROMPT,
                 user_message=user_message,
                 temperature=0.0,
-                timeout=300,
             )
+            # 記錄 grading LLM trace 到 api_usage_logs
+            if user_id:
+                try:
+                    await self.usage_repo.create_log(
+                        user_id=user_id,
+                        trace=trace,
+                        operation="grading",
+                    )
+                except Exception:
+                    logger.warning("Failed to record grading trace", exc_info=True)
             result = parsed.get("is_correct", False)
             reason = parsed.get("reason", "")
             logger.info(
