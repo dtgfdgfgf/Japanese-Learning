@@ -14,10 +14,15 @@ from typing import Any
 import anthropic
 from google import genai
 from google.genai import types
+from google.genai.errors import ServerError as GeminiServerError
 
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Gemini 瞬態錯誤重試設定
+_GEMINI_MAX_RETRIES = 3
+_GEMINI_RETRY_BASE_DELAY = 2  # 秒，指數退避基數
 
 
 @dataclass
@@ -190,7 +195,7 @@ class LLMClient:
         json_mode: bool = False,
         timeout: float | None = None,
     ) -> dict[str, Any]:
-        """Call Google Gemini API（原生 async）。
+        """Call Google Gemini API（原生 async），含瞬態錯誤指數退避重試。
 
         Args:
             json_mode: 為 True 時設定 response_mime_type="application/json"。
@@ -210,20 +215,35 @@ class LLMClient:
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
 
-        async with asyncio.timeout(timeout if timeout is not None else self.timeout):
-            response = await self._gemini_client.aio.models.generate_content(
-                model=model,
-                contents=user_message,
-                config=types.GenerateContentConfig(**config_kwargs),
-            )
+        last_error: Exception | None = None
+        for attempt in range(_GEMINI_MAX_RETRIES + 1):
+            try:
+                async with asyncio.timeout(timeout if timeout is not None else self.timeout):
+                    response = await self._gemini_client.aio.models.generate_content(
+                        model=model,
+                        contents=user_message,
+                        config=types.GenerateContentConfig(**config_kwargs),
+                    )
 
-        content = response.text or ""
-        usage = response.usage_metadata
-        return {
-            "content": content,
-            "input_tokens": usage.prompt_token_count if usage else 0,
-            "output_tokens": usage.candidates_token_count if usage else 0,
-        }
+                content = response.text or ""
+                usage = response.usage_metadata
+                return {
+                    "content": content,
+                    "input_tokens": usage.prompt_token_count if usage else 0,
+                    "output_tokens": usage.candidates_token_count if usage else 0,
+                }
+            except GeminiServerError as e:
+                last_error = e
+                if attempt < _GEMINI_MAX_RETRIES:
+                    delay = _GEMINI_RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        "Gemini %d 錯誤，第 %d/%d 次重試（%ds 後）: %s",
+                        e.code, attempt + 1, _GEMINI_MAX_RETRIES, delay, e,
+                    )
+                    await asyncio.sleep(delay)
+
+        # 重試用盡，拋出最後的錯誤
+        raise last_error  # type: ignore[misc]
 
     async def complete_with_mode(
         self,
