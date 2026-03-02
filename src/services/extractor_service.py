@@ -202,6 +202,7 @@ class ExtractorService:
             mode=mode,
             system_prompt=system_prompt,
             user_message=user_message,
+            timeout=300,  # Gemini 冷啟動可達 ~30s，抽取任務需更長時間
         )
 
         # 記錄 LLM trace 供 debug 用

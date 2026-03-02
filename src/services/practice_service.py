@@ -549,6 +549,7 @@ class PracticeService:
                 system_prompt=GRADER_SYSTEM_PROMPT,
                 user_message=user_message,
                 temperature=0.0,
+                timeout=300,  # Gemini 冷啟動可達 ~30s
             )
             # 記錄 grading LLM trace 到 api_usage_logs
             if user_id:
