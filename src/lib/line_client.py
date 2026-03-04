@@ -21,6 +21,7 @@ from linebot.v3.messaging import (
     QuickReply,
     QuickReplyItem,
     ReplyMessageRequest,
+    ShowLoadingAnimationRequest,
     TextMessage,
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
@@ -221,6 +222,30 @@ class LineClient:
             return True
         except Exception as e:
             logger.error("Failed to send LINE reply with quick_reply: %s", e)
+            return False
+
+    async def show_loading_animation(
+        self,
+        user_id: str,
+        loading_seconds: int = 20,
+    ) -> bool:
+        """顯示 LINE 原生載入指示動畫。
+
+        Args:
+            user_id: LINE user ID（原始值，非 hashed）
+            loading_seconds: 顯示秒數（5 的倍數，5-60）
+        """
+        try:
+            await asyncio.to_thread(
+                self._messaging_api.show_loading_animation,
+                ShowLoadingAnimationRequest(
+                    chat_id=user_id,
+                    loading_seconds=loading_seconds,
+                ),
+            )
+            return True
+        except Exception as e:
+            logger.debug("Failed to show loading animation: %s", e)
             return False
 
     async def push_message(

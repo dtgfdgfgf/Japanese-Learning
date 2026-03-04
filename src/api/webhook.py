@@ -13,8 +13,8 @@ import json
 import logging
 import time
 import unicodedata
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -91,6 +91,11 @@ FOOTER_RESERVE = 300
 
 # Edge Case 26: 超長文本直接入庫閾值（超過此長度跳過 Router）
 LONG_TEXT_THRESHOLD = 2000
+
+# 英文複合詞偵測閾值：2 token 且去空格後總字元 ≤ 此值視為單一複合詞（如 "ice cream", "to be"），
+# 不切分為多單字。15 字元涵蓋常見 2 詞複合詞（平均英文單字 ~5 字元 × 2 + 餘裕）。
+_COMPOUND_WORD_MAX_CHARS = 15
+_COMPOUND_WORD_MAX_TOKENS = 2
 
 
 # ============================================================================
@@ -576,24 +581,30 @@ async def handle_message_event(event: MessageEvent) -> None:
             response = await _handle_delete_select(hashed_uid, int(text.strip()))
         elif has_pending_delete and parsed.command_type in PENDING_SAFE_COMMANDS:
             # 安全指令不影響 pending_delete
-            response = await _dispatch_command(
-                command=parsed,
-                line_user_id=user_id,
-                raw_text=text,
-                mode=current_mode,
-                target_lang=target_lang,
+            response = await _with_thinking_indicator(
+                user_id,
+                _dispatch_command(
+                    command=parsed,
+                    line_user_id=user_id,
+                    raw_text=text,
+                    mode=current_mode,
+                    target_lang=target_lang,
+                ),
             )
         elif has_pending_delete:
             # 非數字、非安全指令 → 清除 pending_delete + 正常分派
             async with get_session() as session:
                 user_state_repo = UserStateRepository(session)
                 await user_state_repo.clear_pending_delete(hashed_uid)
-            response = await _dispatch_command(
-                command=parsed,
-                line_user_id=user_id,
-                raw_text=text,
-                mode=current_mode,
-                target_lang=target_lang,
+            response = await _with_thinking_indicator(
+                user_id,
+                _dispatch_command(
+                    command=parsed,
+                    line_user_id=user_id,
+                    raw_text=text,
+                    mode=current_mode,
+                    target_lang=target_lang,
+                ),
             )
         # 處理 pending_save 狀態
         elif parsed.command_type == CommandType.CONFIRM_SAVE and has_pending_save:
@@ -614,12 +625,15 @@ async def handle_message_event(event: MessageEvent) -> None:
                     user_state_repo = UserStateRepository(session)
                     discarded_word = await user_state_repo.get_pending_save(hashed_uid)
                     await user_state_repo.clear_pending_save(hashed_uid)
-                response = await _dispatch_command(
-                    command=parsed,
-                    line_user_id=user_id,
-                    raw_text=text,
-                    mode=current_mode,
-                    target_lang=target_lang,
+                response = await _with_thinking_indicator(
+                    user_id,
+                    _dispatch_command(
+                        command=parsed,
+                        line_user_id=user_id,
+                        raw_text=text,
+                        mode=current_mode,
+                        target_lang=target_lang,
+                    ),
                 )
                 # 在回覆前加上取消通知（解析 JSON 格式取出實際單字）
                 if discarded_word:
@@ -636,7 +650,10 @@ async def handle_message_event(event: MessageEvent) -> None:
         elif parsed.command_type == CommandType.EXIT_PRACTICE:
             response = await _handle_exit_practice(hashed_uid)
         elif parsed.command_type == CommandType.UNKNOWN and has_session:
-            response = await _handle_practice_answer(hashed_uid, text, current_mode, target_lang)
+            response = await _with_thinking_indicator(
+                user_id,
+                _handle_practice_answer(hashed_uid, text, current_mode, target_lang),
+            )
         elif parsed.command_type == CommandType.MODE_SWITCH:
             mode_key = _resolve_mode_key(parsed)
             if mode_key:
@@ -655,13 +672,25 @@ async def handle_message_event(event: MessageEvent) -> None:
                     response = Messages.ERROR_GENERIC
             else:
                 response = Messages.format("LANG_SWITCH_INVALID")
+        elif (
+            parsed.command_type == CommandType.UNKNOWN
+            and text.strip().isdigit()
+            and not has_pending_delete
+            and not has_pending_save
+            and not has_session
+        ):
+            # 無 pending 狀態下輸入純數字 → 可能是過期的刪除選項
+            response = Messages.format("DELETE_SELECT_EXPIRED")
         else:
-            response = await _dispatch_command(
-                command=parsed,
-                line_user_id=user_id,
-                raw_text=text,
-                mode=current_mode,
-                target_lang=target_lang,
+            response = await _with_thinking_indicator(
+                user_id,
+                _dispatch_command(
+                    command=parsed,
+                    line_user_id=user_id,
+                    raw_text=text,
+                    mode=current_mode,
+                    target_lang=target_lang,
+                ),
             )
 
         # === Post-dispatch session：累加 token + 儲存 last_message ===
@@ -905,6 +934,86 @@ async def _auto_extract(
         return None
 
 
+async def _extract_in_background(
+    hashed_uid: str,
+    raw_user_id: str,
+    doc_id: str,
+    mode: str,
+    target_lang: str,
+) -> None:
+    """背景執行抽取，完成後透過 Push API 通知使用者。"""
+    line_client = get_line_client()
+
+    # 抽取與推播分開 try/except，避免抽取成功但推播失敗時發送錯誤的「分析失敗」訊息
+    summary = None
+    try:
+        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
+    except Exception as e:
+        logger.error("Background extraction failed for doc %s: %s", doc_id, e, exc_info=True)
+
+    msg = (
+        Messages.format("EXTRACT_COMPLETE_PUSH", summary=summary)
+        if summary
+        else Messages.format("EXTRACT_FAILED_PUSH")
+    )
+    try:
+        await line_client.push_message(raw_user_id, msg)
+    except Exception:
+        logger.warning("Failed to push extraction notification for doc %s", doc_id)
+
+
+_T = TypeVar("_T")
+
+
+async def _with_thinking_indicator(
+    raw_user_id: str,
+    coro: Coroutine[Any, Any, _T],
+    initial_delay: float = 20.0,
+    interval: float = 20.0,
+) -> _T:
+    """包裝耗時操作，等待超過 initial_delay 後顯示載入動畫並每 interval 秒推送思考提示。
+
+    - 大多數請求（free mode）<5s 完成，不會觸發任何通知
+    - 超過 initial_delay 後：顯示 LINE 載入動畫 + 推送「思考中⋯」
+    - 每 interval 秒重複推送 + 刷新動畫
+    """
+    task = asyncio.ensure_future(coro)
+    line_client = get_line_client()
+
+    # Phase 1: 等待初始延遲，大多數請求會在此完成
+    done, _ = await asyncio.wait({task}, timeout=initial_delay)
+    if done:
+        return task.result()
+
+    # Phase 2: 超時 → 開始定期通知
+    # 先顯示載入動畫（即時視覺反饋）
+    await line_client.show_loading_animation(raw_user_id, loading_seconds=60)
+
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=interval)
+        if done:
+            return task.result()
+
+        # 推送文字提示 + 刷新載入動畫
+        await line_client.push_message(raw_user_id, "思考中，請稍候⋯")
+        await line_client.show_loading_animation(raw_user_id, loading_seconds=60)
+
+
+def _schedule_background_extraction(
+    hashed_uid: str,
+    raw_user_id: str,
+    doc_id: str,
+    mode: str,
+    target_lang: str,
+) -> None:
+    """排程背景抽取 asyncio.Task，使用 _background_tasks 防止 GC。"""
+    task = asyncio.create_task(
+        _extract_in_background(hashed_uid, raw_user_id, doc_id, mode, target_lang)
+    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 async def _handle_save(line_user_id: str, mode: str = "free", target_lang: str = "ja") -> str:
     """處理入庫指令。"""
     hashed_uid = hash_user_id(line_user_id)
@@ -927,13 +1036,11 @@ async def _handle_save(line_user_id: str, mode: str = "free", target_lang: str =
     if not result.success:
         return result.message
 
-    # 自動抽取
+    # 背景抽取（不阻塞回覆）
     doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
     if doc_id:
-        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
-        if summary:
-            return Messages.format("SAVE_AND_EXTRACT_SUCCESS", summary=summary)
-        return Messages.format("SAVE_EXTRACT_FAILED_HINT")
+        _schedule_background_extraction(hashed_uid, line_user_id, doc_id, mode, target_lang)
+        return Messages.SAVE_PROCESSING
     return result.message
 
 
@@ -959,12 +1066,11 @@ async def _handle_word_save(
     if not result.success:
         return result.message
 
-    # 自動抽取
+    # 背景抽取（不阻塞回覆）
     doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
     if doc_id:
-        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
-        if summary:
-            return Messages.format("WORD_SAVE_AND_EXTRACT", word=word)
+        _schedule_background_extraction(hashed_uid, line_user_id, doc_id, mode, target_lang)
+        return Messages.SAVE_PROCESSING
     return result.message
 
 
@@ -1028,11 +1134,10 @@ async def _handle_confirm_save(
         except Exception as e:
             logger.warning("Direct item creation failed, falling back to auto-extract: %s", e)
 
-    # 無 item 或直接建立失敗 → auto-extract
+    # 無 item 或直接建立失敗 → 背景抽取（不阻塞回覆）
     if doc_id:
-        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
-        if summary:
-            return Messages.format("WORD_SAVE_AND_EXTRACT", word=pending_word)
+        _schedule_background_extraction(hashed_uid, line_user_id, doc_id, mode, target_lang)
+        return Messages.SAVE_PROCESSING
 
     return result.message
 
@@ -1468,6 +1573,14 @@ async def _handle_word_input(
             )
         )
 
+        # 兩個短 token 且總字元數在閾值內 → 視為 compound word（ice cream, to be），不切分
+        if (
+            is_multi_word
+            and len(tokens) <= _COMPOUND_WORD_MAX_TOKENS
+            and len(stripped.replace(" ", "")) <= _COMPOUND_WORD_MAX_CHARS
+        ):
+            is_multi_word = False
+
         if is_multi_word:
             # 處理第一個單字，提示其餘逐一輸入
             first_word = tokens[0]
@@ -1481,8 +1594,7 @@ async def _handle_word_input(
                     llm_traces.append((word_trace, "word_explanation"))
             except Exception as e:
                 logger.exception("Word explanation failed (multi-word first=%s)", first_word)
-                err_hint = f"{type(e).__name__}: {str(e)[:80]}"
-                return f"{Messages.ERROR_API_CALL}\n({err_hint})"
+                return Messages.ERROR_WORD_LOOKUP_BUSY
             async with get_session() as session:
                 user_state_repo = UserStateRepository(session)
                 if extracted_item:
@@ -1512,8 +1624,7 @@ async def _handle_word_input(
                 llm_traces.append((word_trace, "word_explanation"))
         except Exception as e:
             logger.exception("Word explanation failed (single word=%s)", word)
-            err_hint = f"{type(e).__name__}: {str(e)[:80]}"
-            return f"{Messages.ERROR_API_CALL}\n({err_hint})"
+            return Messages.ERROR_WORD_LOOKUP_BUSY
         async with get_session() as session:
             user_state_repo = UserStateRepository(session)
             if extracted_item:
@@ -1553,7 +1664,7 @@ async def _save_and_extract(
     mode: str = "free",
     target_lang: str = "ja",
 ) -> str:
-    """入庫原始內容並自動抽取單字/文法。"""
+    """入庫原始內容並排程背景抽取單字/文法。"""
     hashed_uid = hash_user_id(line_user_id)
 
     async with get_session() as session:
@@ -1565,10 +1676,8 @@ async def _save_and_extract(
     doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
 
     if doc_id:
-        summary = await _auto_extract(hashed_uid, doc_id, mode, target_lang)
-        if summary:
-            return Messages.format("SAVE_AND_EXTRACT_SUCCESS", summary=summary)
-        return Messages.format("SAVE_EXTRACT_FAILED_HINT")
+        _schedule_background_extraction(hashed_uid, line_user_id, doc_id, mode, target_lang)
+        return Messages.SAVE_PROCESSING
     return result.message
 
 
