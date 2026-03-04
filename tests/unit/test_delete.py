@@ -96,6 +96,8 @@ class TestDeleteItem:
         service.item_repo = MagicMock()
         service.item_repo.get_by_id = AsyncMock(return_value=mock_item)
         service.item_repo.soft_delete = AsyncMock(return_value=True)
+        service.practice_log_repo = MagicMock()
+        service.practice_log_repo.soft_delete_by_item = AsyncMock(return_value=0)
 
         success, message = await service.delete_item("test_user_hash", mock_item.item_id)
 
@@ -103,6 +105,7 @@ class TestDeleteItem:
         assert "已刪除" in message
         assert "食べる" in message
         service.item_repo.soft_delete.assert_awaited_once_with(mock_item.item_id)
+        service.practice_log_repo.soft_delete_by_item.assert_awaited_once_with(mock_item.item_id)
 
     @pytest.mark.asyncio
     async def test_delete_item_not_found(self, mock_session):

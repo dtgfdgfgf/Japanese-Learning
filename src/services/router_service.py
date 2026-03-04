@@ -11,6 +11,7 @@ import json
 import logging
 from typing import Any
 
+from google.genai.errors import ServerError as GeminiServerError
 from pydantic import ValidationError
 
 from src.lib.llm_client import LLMResponse, LLMTrace, get_llm_client
@@ -263,6 +264,7 @@ class RouterService:
             user_message=message,
             temperature=0.7,
             max_tokens=1024,
+            total_timeout=60,
         )
 
         return response
@@ -319,6 +321,7 @@ class RouterService:
                 user_message=word,
                 temperature=0.3,
                 max_tokens=1024,
+                total_timeout=60,
             )
 
             return response
@@ -407,6 +410,7 @@ class RouterService:
                 user_message=word,
                 temperature=0.3,
                 max_tokens=2048,
+                total_timeout=60,
             )
 
             display = response_data.get("display", "")
@@ -437,9 +441,12 @@ class RouterService:
 
             return display, extracted_item, trace
 
+        except (TimeoutError, GeminiServerError):
+            # Server 不可用或 timeout — 同一 provider 再呼叫也會失敗，直接傳播
+            raise
         except Exception as e:
             logger.warning("Structured word explanation failed, falling back: %s", e)
-            # Fallback：呼叫原版 get_word_explanation
+            # Fallback：呼叫原版 get_word_explanation（僅 JSON 解析等客戶端錯誤時）
             resp = await self.get_word_explanation(word, mode=mode, target_lang=target_lang)
             return resp.content, None, resp.to_trace()
 

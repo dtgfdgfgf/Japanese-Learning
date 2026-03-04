@@ -738,7 +738,7 @@ class TestLLMGradingFallback:
 
     @pytest.mark.asyncio
     async def test_llm_failure_graceful_fallback(self):
-        """LLM 呼叫失敗時 graceful return False。"""
+        """LLM 呼叫失敗時 graceful return None（由呼叫端決定處理方式）。"""
         from src.services.practice_service import PracticeService
 
         with patch.object(PracticeService, "__init__", lambda self, *a, **kw: None):
@@ -756,7 +756,7 @@ class TestLLMGradingFallback:
                 question_context="test 是什麼意思？",
             )
 
-            assert result is False
+            assert result is None
 
     @pytest.mark.asyncio
     async def test_submit_answer_uses_accepted_answers(self):

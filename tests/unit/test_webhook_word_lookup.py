@@ -264,10 +264,10 @@ class TestMultiWordInput:
         mock_hash: MagicMock,
         mock_session_ctx: MagicMock,
     ) -> None:
-        """「red apple」→ 解釋 red + 提示 apple。"""
+        """「red apple」→ compound word（2 token ≤15 字元），整體作為單字解釋。"""
         mock_router = MagicMock()
         mock_router.get_word_explanation_structured = AsyncMock(
-            return_value=("red 表示紅色", _SAMPLE_EXTRACTED_ITEM, None)
+            return_value=("red apple 表示紅蘋果", _SAMPLE_EXTRACTED_ITEM, None)
         )
         mock_get_router.return_value = mock_router
         mock_search.return_value = []
@@ -287,12 +287,11 @@ class TestMultiWordInput:
         ):
             result = await _handle_unknown("Utest", "red apple", mode="free", target_lang="en")
 
-        # 應解釋第一個單字
+        # 2 token ≤15 字元 → compound word，整體查詢而非拆分
         mock_router.get_word_explanation_structured.assert_awaited_once_with(
-            "red", mode="free", target_lang="en"
+            "red apple", mode="free", target_lang="en"
         )
-        # 應提及其餘單字
-        assert "apple" in result
+        assert "red apple" in result
 
 
 # ============================================================================
@@ -338,6 +337,6 @@ class TestWordExplanationApiFailure:
         ):
             result = await _handle_unknown("Utest", "spell", mode="free", target_lang="en")
 
-        assert "API呼叫失敗" in result
+        assert "系統繁忙" in result
         mock_user_state_repo.set_pending_save.assert_not_awaited()
         mock_user_state_repo.set_pending_save_with_item.assert_not_awaited()

@@ -67,12 +67,16 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "ERROR_COST": "查詢用量時發生錯誤，請稍後再試",
     "ERROR_STATS": "查詢統計時發生錯誤，請稍後再試",
     "ERROR_API_CALL": "API呼叫失敗，請聯絡開發者",
+    "ERROR_WORD_LOOKUP_BUSY": "目前系統繁忙，請稍後再試 🙇",
     
     # ========== 入庫相關 ==========
     "SAVE_SUCCESS": "已入庫：{content_preview}",
     "SAVE_SUCCESS_WITH_HINT": "已入庫：{content_preview}\n\n💡 輸入「練習」開始複習",
     "SAVE_AND_EXTRACT_SUCCESS": "✅ 已入庫 {summary}\n💡 輸入「練習」開始複習",
     "SAVE_EXTRACT_FAILED_HINT": "✅ 已入庫\n\n⚠️ 自動分析失敗，請稍後再入庫一次",
+    "SAVE_PROCESSING": "✅ 已入庫，分析中…完成後將自動通知 🔔",
+    "EXTRACT_COMPLETE_PUSH": "✅ 分析完成！已抽取 {summary}\n💡 輸入「練習」開始複習",
+    "EXTRACT_FAILED_PUSH": "📄 已入庫，但自動分析未找到可抽取的內容",
     "WORD_SAVE_AND_EXTRACT": "✅ {word}已入庫\n💡 輸入「練習」開始複習",
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
     "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，請在 5 分鐘內輸入「1」即可入庫\n直接輸入其他單字將取消本次入庫並開始新查詢\n若非你要查的字，請重新輸入正確的拼寫",
@@ -107,6 +111,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "PRACTICE_HEADER": "📝 今日練習（共 {total} 題）\n\n第 1 題：\n",
     "PRACTICE_FOOTER": "",
     "PRACTICE_ANSWER_CORRECT": "✅ 正確！",
+    "GRADING_TIMEOUT": "⏱ 批改逾時，已自動跳過，請繼續作答",
     "PRACTICE_ANSWER_WRONG": "❌ 答案是：{expected}",
     "PRACTICE_NEXT_QUESTION": "\n\n下一題：\n{question}",
     
@@ -312,9 +317,11 @@ class Messages:
     ERROR_COST: str = _MESSAGES_ZH_TW["ERROR_COST"]
     ERROR_STATS: str = _MESSAGES_ZH_TW["ERROR_STATS"]
     ERROR_API_CALL: str = _MESSAGES_ZH_TW["ERROR_API_CALL"]
+    ERROR_WORD_LOOKUP_BUSY: str = _MESSAGES_ZH_TW["ERROR_WORD_LOOKUP_BUSY"]
     
     # 入庫
     SAVE_NO_CONTENT: str = _MESSAGES_ZH_TW["SAVE_NO_CONTENT"]
+    SAVE_PROCESSING: str = _MESSAGES_ZH_TW["SAVE_PROCESSING"]
     PENDING_EXPIRED: str = _MESSAGES_ZH_TW["PENDING_EXPIRED"]
     
     # 搜尋

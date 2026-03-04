@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -95,8 +96,8 @@ usage_context_var: ContextVar[UsageContext | None] = ContextVar(
 
 # 模式 → provider / model 映射
 MODE_MODEL_MAP: dict[str, dict[str, str]] = {
-    "free": {"provider": "google", "model": "gemini-3-pro-preview"},
-    "cheap": {"provider": "anthropic", "model": "claude-sonnet-4-5-20250929"},
+    "free": {"provider": "google", "model": "gemini-3.1-flash-lite-preview"},
+    "cheap": {"provider": "anthropic", "model": "claude-sonnet-4-6"},
     "rigorous": {"provider": "anthropic", "model": "claude-opus-4-6"},
 }
 
@@ -197,13 +198,15 @@ class LLMClient:
         json_mode: bool = False,
         timeout: float | None = None,
         max_tokens: int | None = None,
+        total_timeout: float | None = None,
     ) -> dict[str, Any]:
         """Call Google Gemini API（原生 async），含瞬態錯誤指數退避重試。
 
         Args:
             json_mode: 為 True 時設定 response_mime_type="application/json"。
-            timeout: 覆蓋預設 timeout（秒）。
+            timeout: 覆蓋預設 timeout（秒）。每次 attempt 的獨立上限。
             max_tokens: 覆蓋預設 max_output_tokens。
+            total_timeout: retry loop 整體上限（秒）。避免多次重試累加等待過長。
 
         Returns:
             Dict with content, input_tokens, output_tokens
@@ -219,36 +222,43 @@ class LLMClient:
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
 
-        last_error: Exception | None = None
-        for attempt in range(_GEMINI_MAX_RETRIES + 1):
-            try:
-                async with asyncio.timeout(timeout if timeout is not None else self.timeout):
-                    response = await self._gemini_client.aio.models.generate_content(
-                        model=model,
-                        contents=user_message,
-                        config=types.GenerateContentConfig(**config_kwargs),
-                    )
+        async def _retry_loop() -> dict[str, Any]:
+            last_error: Exception | None = None
+            for attempt in range(_GEMINI_MAX_RETRIES + 1):
+                try:
+                    async with asyncio.timeout(timeout if timeout is not None else self.timeout):
+                        response = await self._gemini_client.aio.models.generate_content(
+                            model=model,
+                            contents=user_message,
+                            config=types.GenerateContentConfig(**config_kwargs),
+                        )
 
-                content = response.text or ""
-                usage = response.usage_metadata
-                return {
-                    "content": content,
-                    "input_tokens": usage.prompt_token_count if usage else 0,
-                    "output_tokens": usage.candidates_token_count if usage else 0,
-                }
-            except (GeminiServerError, TimeoutError) as e:
-                last_error = e
-                if attempt < _GEMINI_MAX_RETRIES:
-                    delay = _GEMINI_RETRY_BASE_DELAY * (2 ** attempt)
-                    err_code = getattr(e, "code", "timeout")
-                    logger.warning(
-                        "Gemini %s 錯誤，第 %d/%d 次重試（%ds 後）: %s",
-                        err_code, attempt + 1, _GEMINI_MAX_RETRIES, delay, e,
-                    )
-                    await asyncio.sleep(delay)
+                    content = response.text or ""
+                    usage = response.usage_metadata
+                    return {
+                        "content": content,
+                        "input_tokens": usage.prompt_token_count if usage else 0,
+                        "output_tokens": usage.candidates_token_count if usage else 0,
+                    }
+                except GeminiServerError as e:
+                    last_error = e
+                    if attempt < _GEMINI_MAX_RETRIES:
+                        delay = _GEMINI_RETRY_BASE_DELAY * (2 ** attempt)
+                        err_code = getattr(e, "code", "503")
+                        logger.warning(
+                            "Gemini %s 錯誤，第 %d/%d 次重試（%ds 後）: %s",
+                            err_code, attempt + 1, _GEMINI_MAX_RETRIES, delay, e,
+                        )
+                        await asyncio.sleep(delay)
 
-        # 重試用盡，拋出最後的錯誤
-        raise last_error  # type: ignore[misc]
+            # 重試用盡，拋出最後的錯誤
+            raise last_error  # type: ignore[misc]
+
+        # 外層 total_timeout 包裹整個 retry loop
+        if total_timeout is not None:
+            async with asyncio.timeout(total_timeout):
+                return await _retry_loop()
+        return await _retry_loop()
 
     async def complete_with_mode(
         self,
@@ -259,6 +269,7 @@ class LLMClient:
         json_mode: bool = False,
         timeout: float | None = None,
         max_tokens: int | None = None,
+        total_timeout: float | None = None,
     ) -> LLMResponse:
         """根據模式選擇 provider/model 完成 LLM 呼叫。
 
@@ -271,6 +282,7 @@ class LLMClient:
             temperature: 取樣溫度
             json_mode: 是否要求 JSON 輸出
             max_tokens: 最大輸出 token 數（預設 DEFAULT_MAX_TOKENS）
+            total_timeout: retry loop 整體上限（秒），僅對 Gemini 生效
 
         Returns:
             LLMResponse
@@ -290,6 +302,7 @@ class LLMClient:
             json_mode=json_mode,
             timeout=timeout,
             max_tokens=max_tokens,
+            total_timeout=total_timeout,
         )
         latency_ms = int((time.monotonic() - start_time) * 1000)
         resp = LLMResponse(
@@ -313,6 +326,7 @@ class LLMClient:
         json_mode: bool = False,
         timeout: float | None = None,
         max_tokens: int | None = None,
+        total_timeout: float | None = None,
     ) -> dict[str, Any]:
         """統一的 provider 呼叫分派。"""
         if provider == "anthropic":
@@ -334,6 +348,7 @@ class LLMClient:
                 json_mode=json_mode,
                 timeout=timeout,
                 max_tokens=max_tokens,
+                total_timeout=total_timeout,
             )
         else:
             raise ValueError(f"Unknown provider: {provider}")
@@ -346,6 +361,7 @@ class LLMClient:
         temperature: float = 0.3,
         timeout: float | None = None,
         max_tokens: int | None = None,
+        total_timeout: float | None = None,
     ) -> tuple[dict[str, Any], LLMTrace]:
         """根據模式完成 JSON 回應，與 complete_json 相同解析邏輯。"""
         response = await self.complete_with_mode(
@@ -356,15 +372,13 @@ class LLMClient:
             json_mode=True,
             timeout=timeout,
             max_tokens=max_tokens,
+            total_timeout=total_timeout,
         )
 
         content = response.content.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
+        # 剝離 LLM 輸出的 markdown code fence（處理大小寫、多餘空行等變異）
+        content = re.sub(r'^```(?:json)?\s*\n?', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'\n?```\s*$', '', content)
 
         try:
             parsed = json.loads(content.strip())

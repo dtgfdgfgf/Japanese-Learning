@@ -98,8 +98,12 @@ class ExtractorService:
 
         # 偵測語言並與使用者目標語言比對
         lang = detect_language(raw_text)
-        # 允許：偵測到的語言與目標一致、unknown、或 mixed
-        if lang not in (target_lang, "unknown", "mixed"):
+        # ja mode 的 skip set 為空：不自動跳過任何語言。
+        # 理由：日文學習素材常混合中文/英文註釋，語言偵測結果不可靠；
+        # 讓 LLM 自行判斷是否有日語可抽取，最壞情況是回傳空列表（0 items）。
+        # en mode 則明確跳過日文（反向不符合學習目標）。
+        _SKIP_LANGS: dict[str, set[str]] = {"ja": set(), "en": {"ja"}}
+        if lang in _SKIP_LANGS.get(target_lang, set()):
             lang_name = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
             logger.warning("Document %s lang mismatch: detected=%s, target=%s", doc_id, lang, target_lang)
             await self._update_document_status(doc_id, "skipped", lang)
@@ -202,7 +206,8 @@ class ExtractorService:
             mode=mode,
             system_prompt=system_prompt,
             user_message=user_message,
-            timeout=300,  # Gemini 冷啟動可達 ~30s，抽取任務需更長時間
+            timeout=30,  # 單次 attempt 上限
+            total_timeout=60,  # retry loop 整體上限，避免累加等待過長
         )
 
         # 記錄 LLM trace 供 debug 用

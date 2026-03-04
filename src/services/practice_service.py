@@ -441,22 +441,23 @@ class PracticeService:
             await self.session_service.clear_session(user_id)
             return None, practice_session.format_result_message()
 
-        # Grade answer — GRAMMAR_USAGE 使用模糊判定（答案需包含 pattern）
+        # Grade answer — GRAMMAR_USAGE 一律用 LLM 語義判定
+        # substring 比對 false positive 過高（幾乎任何包含 pattern 的句子都會判對）
+        grading_timeout = False
         if current_question.practice_type == PracticeType.GRAMMAR_USAGE:
-            norm_pattern = normalize_for_compare(current_question.expected_answer)
-            norm_answer = normalize_for_compare(answer_text)
-            # 短 pattern（≤2 字元，如「は」「が」）幾乎出現在任何句子中，
-            # 直接交給 LLM 語義判定避免 false positive
-            if len(norm_pattern) <= 2:
-                is_correct = await self._llm_grade_answer(
-                    user_answer=answer_text,
-                    expected_answer=current_question.expected_answer,
-                    accepted_answers=[current_question.expected_answer],
-                    question_context=current_question.prompt,
-                    user_id=user_id,
-                )
+            grade_result = await self._llm_grade_answer(
+                user_answer=answer_text,
+                expected_answer=current_question.expected_answer,
+                accepted_answers=[current_question.expected_answer],
+                question_context=current_question.prompt,
+                user_id=user_id,
+            )
+            if grade_result is None:
+                # LLM 逾時/失敗 → 視為正確（不懲罰使用者），加提示
+                is_correct = True
+                grading_timeout = True
             else:
-                is_correct = norm_pattern in norm_answer
+                is_correct = grade_result
         else:
             # Phase 1：嚴格匹配（含 accepted_answers）
             grading_answers = (
@@ -468,13 +469,18 @@ class PracticeService:
 
             # Phase 2：LLM 語義 fallback
             if not is_correct:
-                is_correct = await self._llm_grade_answer(
+                grade_result = await self._llm_grade_answer(
                     user_answer=answer_text,
                     expected_answer=current_question.expected_answer,
                     accepted_answers=grading_answers,
                     question_context=current_question.prompt,
                     user_id=user_id,
                 )
+                if grade_result is None:
+                    # LLM 逾時 → 保持 Phase 1 結果（False），不額外處理
+                    pass
+                else:
+                    is_correct = grade_result
 
         # Create answer record
         practice_answer = PracticeAnswer(
@@ -507,6 +513,8 @@ class PracticeService:
 
         # Build response message
         feedback = practice_answer.format_feedback_message()
+        if grading_timeout:
+            feedback = f"{Messages.format('GRADING_TIMEOUT')}\n{feedback}"
 
         if practice_session.current_index >= practice_session.total_questions:
             practice_session.is_complete = True
@@ -531,11 +539,11 @@ class PracticeService:
         accepted_answers: list[str],
         question_context: str,
         user_id: str | None = None,
-    ) -> bool:
+    ) -> bool | None:
         """Phase 2：LLM 語義判定 fallback。
 
         嚴格匹配失敗時，用 LLM 判斷語義等價性。
-        LLM 失敗時 fail-safe 回傳 False。
+        LLM 失敗時回傳 None（由呼叫端決定如何處理）。
         """
         try:
             user_message = format_grader_request(
@@ -549,7 +557,8 @@ class PracticeService:
                 system_prompt=GRADER_SYSTEM_PROMPT,
                 user_message=user_message,
                 temperature=0.0,
-                timeout=300,  # Gemini 冷啟動可達 ~30s
+                timeout=15,  # 單次 attempt 上限
+                total_timeout=30,  # retry loop 整體上限
             )
             # 記錄 grading LLM trace 到 api_usage_logs
             if user_id:
@@ -570,11 +579,11 @@ class PracticeService:
             return bool(result)
         except Exception:
             logger.warning(
-                "LLM grading failed, falling back to strict: answer=%r expected=%r",
+                "LLM grading failed (timeout/error): answer=%r expected=%r",
                 user_answer, expected_answer,
                 exc_info=True,
             )
-            return False
+            return None
 
 
 async def has_active_session(db_session: AsyncSession, user_id: str) -> bool:

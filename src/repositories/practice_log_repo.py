@@ -6,7 +6,7 @@ DoD: 可 create/get practice_log；get_by_item 回傳該 item 的練習紀錄
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Float, Integer, func, select
+from sqlalchemy import Float, Integer, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.practice_log import PracticeLog
@@ -264,3 +264,22 @@ class PracticeLogRepository(BaseRepository[PracticeLog]):
 
         result = await self.session.execute(stmt)
         return result.scalar() or 0
+
+    async def soft_delete_by_item(self, item_id: str) -> int:
+        """軟刪除指定 item 的所有練習紀錄。
+
+        Args:
+            item_id: 被刪除的 item ID
+
+        Returns:
+            受影響的紀錄數
+        """
+        stmt = (
+            update(PracticeLog)
+            .where(PracticeLog.item_id == item_id)
+            .where(PracticeLog.is_deleted.is_(False))
+            .values(is_deleted=True)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount

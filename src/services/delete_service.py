@@ -16,6 +16,7 @@ from src.models.practice_log import PracticeLog
 from src.models.practice_session import PracticeSessionModel
 from src.models.raw_message import RawMessage
 from src.repositories.item_repo import ItemRepository
+from src.repositories.practice_log_repo import PracticeLogRepository
 from src.templates.messages import (
     Messages,
     format_delete_clear_success,
@@ -36,6 +37,7 @@ class DeleteService:
         """
         self.session = session
         self.item_repo = ItemRepository(session)
+        self.practice_log_repo = PracticeLogRepository(session)
 
     async def delete_item(self, user_id: str, item_id: str) -> tuple[bool, str]:
         """刪除指定的 item（軟刪除，驗證所有權）。
@@ -52,8 +54,11 @@ class DeleteService:
         if not item or item.user_id != user_id:
             return False, Messages.DELETE_NOTHING
 
-        # 軟刪除
+        # 軟刪除 item + 級聯軟刪除相關練習紀錄
         await self.item_repo.soft_delete(item_id)
+        deleted_logs = await self.practice_log_repo.soft_delete_by_item(item_id)
+        if deleted_logs > 0:
+            logger.info("Cascade soft-deleted %d practice logs for item %s", deleted_logs, item_id)
 
         # 格式化 label
         label = self.format_item_label(item)

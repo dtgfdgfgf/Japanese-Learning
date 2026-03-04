@@ -69,7 +69,7 @@ class Settings(BaseSettings):
 
     # LLM Settings
     llm_timeout_seconds: int = Field(
-        default=15, ge=5, le=60, description="LLM API timeout in seconds"
+        default=120, ge=5, le=300, description="LLM API timeout in seconds"
     )
 
     @field_validator("database_url")

@@ -21,11 +21,11 @@ class TestModeModelMap:
 
     def test_free_maps_to_google(self):
         assert MODE_MODEL_MAP["free"]["provider"] == "google"
-        assert MODE_MODEL_MAP["free"]["model"] == "gemini-3-pro-preview"
+        assert MODE_MODEL_MAP["free"]["model"] == "gemini-3.1-flash-lite-preview"
 
     def test_cheap_maps_to_anthropic(self):
         assert MODE_MODEL_MAP["cheap"]["provider"] == "anthropic"
-        assert MODE_MODEL_MAP["cheap"]["model"] == "claude-sonnet-4-5-20250929"
+        assert MODE_MODEL_MAP["cheap"]["model"] == "claude-sonnet-4-6"
 
     def test_rigorous_maps_to_anthropic(self):
         assert MODE_MODEL_MAP["rigorous"]["provider"] == "anthropic"
