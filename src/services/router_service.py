@@ -626,6 +626,7 @@ class RouterService:
                     "example": item_data.get("example"),
                     "example_translation": item_data.get("example_translation"),
                     "confidence": 1.0,
+                    "display": display,
                 }
                 if target_lang == "ja":
                     extracted_item["reading"] = item_data.get("reading")

@@ -33,6 +33,8 @@ def _mock_item(surface: str = "FIT", item_type: str = "vocab") -> MagicMock:
 
 
 # 預設的 structured 回傳用 extracted_item
+_SAMPLE_DISPLAY = "【FIT】/fɪt/\n詞性：adjective\n中文：適合的、健康的\n例句：This shirt fits well.\n翻譯：這件襯衫很合身。"
+
 _SAMPLE_EXTRACTED_ITEM = {
     "item_type": "vocab",
     "key": "vocab:FIT",
@@ -43,6 +45,7 @@ _SAMPLE_EXTRACTED_ITEM = {
     "example": "This shirt fits well.",
     "example_translation": "這件襯衫很合身。",
     "confidence": 1.0,
+    "display": _SAMPLE_DISPLAY,
 }
 
 
@@ -340,3 +343,150 @@ class TestWordExplanationApiFailure:
         assert "系統繁忙" in result
         mock_user_state_repo.set_pending_save.assert_not_awaited()
         mock_user_state_repo.set_pending_save_with_item.assert_not_awaited()
+
+
+# ============================================================================
+# DB hit 單筆有 display → 回傳 header + display 全文
+# ============================================================================
+
+
+class TestDbHitWithDisplay:
+    """DB 單筆結果有 display 時，回傳完整 LLM 分析而非摘要。"""
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_single_result_with_display_returns_full_text(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+    ) -> None:
+        """單筆 DB 結果且 payload 有 display → 回傳 header + display 全文。"""
+        mock_router = MagicMock()
+        mock_get_router.return_value = mock_router
+
+        mock_item = MagicMock()
+        mock_item.item_type = "vocab"
+        mock_item.payload = {
+            "surface": "FIT",
+            "pronunciation": "fɪt",
+            "glossary_zh": ["適合"],
+            "display": _SAMPLE_DISPLAY,
+        }
+        mock_search.return_value = [mock_item]
+
+        result = await _handle_unknown("Utest", "FIT", mode="free", target_lang="en")
+
+        # 應包含完整 display 文字
+        assert _SAMPLE_DISPLAY in result
+        # 應包含搜尋 header
+        assert "找到" in result
+        # 不應呼叫 LLM
+        mock_router.get_word_explanation_structured.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_multiple_results_use_summary_format(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+    ) -> None:
+        """多筆 DB 結果 → 仍走摘要格式，不顯示 display 全文。"""
+        mock_router = MagicMock()
+        mock_get_router.return_value = mock_router
+
+        items = []
+        for surface in ["FIT", "FITness"]:
+            item = MagicMock()
+            item.item_type = "vocab"
+            item.payload = {
+                "surface": surface,
+                "pronunciation": "fɪt",
+                "glossary_zh": ["適合"],
+                "display": f"完整分析：{surface}",
+            }
+            items.append(item)
+        mock_search.return_value = items
+
+        result = await _handle_unknown("Utest", "FIT", mode="free", target_lang="en")
+
+        # 多筆結果不應包含 display 全文
+        assert "完整分析：FIT" not in result
+        # 應走摘要格式（有編號列表）
+        assert "1." in result
+        assert "2." in result
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_single_result_without_display_uses_summary(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+    ) -> None:
+        """單筆 DB 結果但無 display（舊資料）→ 走摘要格式。"""
+        mock_router = MagicMock()
+        mock_get_router.return_value = mock_router
+
+        mock_item = MagicMock()
+        mock_item.item_type = "vocab"
+        mock_item.payload = {
+            "surface": "FIT",
+            "pronunciation": "fɪt",
+            "glossary_zh": ["適合"],
+        }
+        mock_search.return_value = [mock_item]
+
+        result = await _handle_unknown("Utest", "FIT", mode="free", target_lang="en")
+
+        # 無 display → 走摘要格式（有編號列表）
+        assert "1." in result
+        assert "FIT" in result
+
+
+# ============================================================================
+# _format_search_results: show_display 參數行為
+# ============================================================================
+
+
+class TestFormatSearchResultsShowDisplay:
+    """搜尋指令（show_display=False）vs 單字查詢（show_display=True）。"""
+
+    def _make_item(self, surface: str = "FIT", display: str | None = None) -> MagicMock:
+        item = MagicMock()
+        item.item_type = "vocab"
+        item.payload = {
+            "surface": surface,
+            "pronunciation": "fɪt",
+            "glossary_zh": ["適合"],
+        }
+        if display is not None:
+            item.payload["display"] = display
+        return item
+
+    def test_search_command_single_with_display_uses_summary(self) -> None:
+        """搜尋指令單筆有 display → 仍走摘要格式（預設 show_display=False）。"""
+        from src.api.webhook import _format_search_results
+
+        item = self._make_item(display="完整 LLM 分析文字")
+        result = _format_search_results([item])
+
+        assert "完整 LLM 分析文字" not in result
+        assert "1." in result
+
+    def test_word_lookup_single_with_display_shows_full(self) -> None:
+        """單字查詢單筆有 display → show_display=True 顯示全文。"""
+        from src.api.webhook import _format_search_results
+
+        display_text = "【FIT】/fɪt/\n詞性：adjective"
+        item = self._make_item(display=display_text)
+        result = _format_search_results([item], show_display=True)
+
+        assert display_text in result

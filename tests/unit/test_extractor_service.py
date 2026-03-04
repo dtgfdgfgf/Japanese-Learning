@@ -352,3 +352,42 @@ class TestExtractorPromptLang:
         assert "pronunciation" in payload
         assert payload["pronunciation"] == "/kənˈsɪdər/"
         assert "reading" not in payload  # 英文不應有 reading
+
+    def test_vocab_to_payload_includes_display(self):
+        """vocab item 有 display 時，to_payload 包含 display 欄位。"""
+        item = ExtractedItem(
+            item_type="vocab",
+            key="vocab:考える",
+            surface="考える",
+            reading="かんがえる",
+            pos="verb",
+            glossary_zh=["思考"],
+            display="【考える】かんがえる\n詞性：動詞\n中文：思考",
+        )
+        payload = item.to_payload()
+        assert payload["display"] == "【考える】かんがえる\n詞性：動詞\n中文：思考"
+
+    def test_grammar_to_payload_includes_display(self):
+        """grammar item 有 display 時，to_payload 包含 display 欄位。"""
+        item = ExtractedItem(
+            item_type="grammar",
+            key="grammar:〜てしまう",
+            pattern="〜てしまう",
+            meaning_zh="表示遺憾",
+            form_notes="Vて + しまう",
+            display="【〜てしまう】表示完成或遺憾",
+        )
+        payload = item.to_payload()
+        assert payload["display"] == "【〜てしまう】表示完成或遺憾"
+
+    def test_to_payload_omits_display_when_none(self):
+        """display 為 None 時，to_payload 不包含 display key。"""
+        item = ExtractedItem(
+            item_type="vocab",
+            key="vocab:test",
+            surface="test",
+            pos="noun",
+            glossary_zh=["測試"],
+        )
+        payload = item.to_payload()
+        assert "display" not in payload

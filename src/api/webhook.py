@@ -1611,7 +1611,7 @@ async def _handle_word_input(
         word = stripped
         db_items = await _search_user_items(hashed_user_id, word)
         if db_items:
-            return _format_search_results(db_items)
+            return _format_search_results(db_items, show_display=True)
 
         # DB 無紀錄：LLM 解釋 + 詢問入庫
         try:
@@ -1698,8 +1698,16 @@ async def _search_user_items(hashed_user_id: str, keyword: str, limit: int = MAX
         )
 
 
-def _format_search_results(items: "Sequence[Item]") -> str:
-    """格式化搜尋結果為使用者友善的訊息。"""
+def _format_search_results(items: "Sequence[Item]", *, show_display: bool = False) -> str:
+    """格式化搜尋結果為使用者友善的訊息。
+
+    show_display=True 且單筆結果有 display 全文時，回傳 header + 完整 LLM 分析；
+    其餘情況走摘要格式。
+    """
+    # 單筆且有 display → 回傳完整 LLM 分析（僅單字查詢 DB hit 使用）
+    if show_display and len(items) == 1 and items[0].payload and items[0].payload.get("display"):
+        return f"{format_search_result_header(1)}\n{items[0].payload['display']}"
+
     lines = [format_search_result_header(len(items))]
 
     for i, item in enumerate(items[:DISPLAY_LIMIT], 1):

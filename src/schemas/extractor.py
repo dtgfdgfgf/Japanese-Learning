@@ -70,6 +70,10 @@ class ExtractedItem(BaseModel):
         le=1.0,
         description="Extraction confidence score"
     )
+    display: str | None = Field(
+        None,
+        description="LLM 生成的完整分析文字，用於 LINE 顯示"
+    )
 
     def to_payload(self) -> dict:
         """Convert to payload dict for Item model."""
@@ -86,15 +90,20 @@ class ExtractedItem(BaseModel):
                 payload["reading"] = self.reading
             if self.pronunciation:
                 payload["pronunciation"] = self.pronunciation
+            if self.display:
+                payload["display"] = self.display
             return payload
         else:  # grammar
-            return {
+            payload = {
                 "pattern": self.pattern,
                 "meaning_zh": self.meaning_zh,
                 "form_notes": self.form_notes,
                 "example": self.example,
                 "example_translation": self.example_translation,
             }
+            if self.display:
+                payload["display"] = self.display
+            return payload
 
 
 class ExtractorRequest(BaseModel):
