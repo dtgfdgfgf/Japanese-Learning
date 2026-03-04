@@ -181,20 +181,17 @@ class TestAddTokens:
 
     @pytest.mark.asyncio
     async def test_add_tokens_returns_updated(self):
-        """add_tokens 應執行 SQL 原子更新並回傳更新後的 profile。"""
+        """add_tokens 應執行 UPDATE ... RETURNING 並回傳更新後的 profile。"""
         updated_profile = _make_profile(daily_used=500)
 
-        # execute 被呼叫兩次：第一次 UPDATE，第二次 SELECT
-        update_result = MagicMock()  # UPDATE 不需 scalar
-        select_result = _mock_scalar_result(updated_profile)
+        # 使用 returning() 只呼叫一次 execute
+        returning_result = _mock_scalar_result(updated_profile)
         session = AsyncMock()
-        session.execute = AsyncMock(side_effect=[update_result, select_result])
+        session.execute = AsyncMock(return_value=returning_result)
         session.flush = AsyncMock()
-        session.refresh = AsyncMock()
 
         repo = UserProfileRepository(session)
         result = await repo.add_tokens("hashed_user", 500)
 
         assert result.daily_used_tokens == 500
-        assert session.execute.await_count == 2
-        session.refresh.assert_awaited_once()
+        assert session.execute.await_count == 1

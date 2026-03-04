@@ -145,7 +145,7 @@ class TestDeleteItem:
             "glossary_zh": ["吃"],
         }
 
-        label = DeleteService._format_item_label(mock_item)
+        label = DeleteService.format_item_label(mock_item)
         assert "食べる" in label
         assert "たべる" in label
         assert "吃" in label
@@ -160,7 +160,7 @@ class TestDeleteItem:
             "meaning_zh": "完全做完；不小心做了",
         }
 
-        label = DeleteService._format_item_label(mock_item)
+        label = DeleteService.format_item_label(mock_item)
         assert "〜てしまう" in label
         assert "完全做完" in label
 
@@ -175,7 +175,7 @@ class TestDeleteItem:
             "glossary_zh": ["吃"],
         }
 
-        label = DeleteService._format_item_label(mock_item)
+        label = DeleteService.format_item_label(mock_item)
         assert "【" not in label  # 不應有【reading】
 
 
@@ -193,12 +193,12 @@ class TestClearAllData:
     async def test_clear_all_data_includes_practice_logs(self, mock_session):
         """清空資料需包含練習紀錄並反映在回傳訊息。"""
         service = DeleteService(mock_session)
-        # _soft_delete_all 依序呼叫：Item(3), PracticeLog(4), Document(2), RawMessage(1)
-        service._soft_delete_all = AsyncMock(side_effect=[3, 4, 2, 1])
+        # _soft_delete_all 依序呼叫：Item(3), PracticeLog(4), Document(2), RawMessage(1), PracticeSession(2)
+        service._soft_delete_all = AsyncMock(side_effect=[3, 4, 2, 1, 2])
 
         deleted_count, message = await service.clear_all_data("test_user_hash")
 
-        assert deleted_count == 10
+        assert deleted_count == 12
         assert "4 筆練習紀錄" in message
 
 

@@ -28,7 +28,7 @@ class SessionService:
     async def set_session(self, user_id: str, practice_session: PracticeSession) -> None:
         """儲存 session（會 soft delete 舊的）。"""
         await self.repo.upsert(user_id, practice_session)
-        logger.debug(f"Stored session {practice_session.session_id} for user {user_id[:8]}")
+        logger.debug("Stored session %s for user %s", practice_session.session_id, user_id[:8])
 
     async def update_session(self, user_id: str, practice_session: PracticeSession) -> None:
         """更新現有 session 的 state（不建新記錄）。"""
@@ -37,7 +37,7 @@ class SessionService:
     async def clear_session(self, user_id: str) -> bool:
         """清除使用者的 session。"""
         await self.repo.delete(user_id)
-        logger.debug(f"Cleared session for user {user_id[:8]}")
+        logger.debug("Cleared session for user %s", user_id[:8])
         return True
 
     async def has_active_session(self, user_id: str) -> bool:
@@ -49,5 +49,5 @@ class SessionService:
         """清除所有過期 sessions。"""
         count = await self.repo.cleanup_expired()
         if count:
-            logger.info(f"Cleaned up {count} expired sessions")
+            logger.info("Cleaned up %d expired sessions", count)
         return count

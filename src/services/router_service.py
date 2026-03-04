@@ -70,7 +70,7 @@ class RouterService:
             return parsed, llm_response
 
         except Exception as e:
-            logger.error(f"Router classification failed, using heuristic: {e}")
+            logger.error("Router classification failed, using heuristic: %s", e)
             return self._heuristic_classify(message, target_lang=target_lang), None
     
     def _parse_llm_response(
@@ -104,7 +104,7 @@ class RouterService:
             return classification.to_response()
             
         except (json.JSONDecodeError, KeyError, ValueError, ValidationError) as e:
-            logger.warning(f"Failed to parse router response: {e}")
+            logger.warning("Failed to parse router response: %s", e)
             
             # JSON 解析失敗，使用啟發式分類
             return self._heuristic_classify(original_message, target_lang=target_lang)
@@ -262,6 +262,7 @@ class RouterService:
             system_prompt=system_prompt,
             user_message=message,
             temperature=0.7,
+            max_tokens=1024,
         )
 
         return response
@@ -317,12 +318,13 @@ class RouterService:
                 system_prompt=system_prompt,
                 user_message=word,
                 temperature=0.3,
+                max_tokens=1024,
             )
 
             return response
 
         except Exception as e:
-            logger.error(f"Word explanation generation failed: {e}")
+            logger.error("Word explanation generation failed: %s", e)
             raise
 
     async def get_word_explanation_structured(
@@ -404,6 +406,7 @@ class RouterService:
                 system_prompt=system_prompt,
                 user_message=word,
                 temperature=0.3,
+                max_tokens=2048,
             )
 
             display = response_data.get("display", "")
@@ -435,7 +438,7 @@ class RouterService:
             return display, extracted_item, trace
 
         except Exception as e:
-            logger.warning(f"Structured word explanation failed, falling back: {e}")
+            logger.warning("Structured word explanation failed, falling back: %s", e)
             # Fallback：呼叫原版 get_word_explanation
             resp = await self.get_word_explanation(word, mode=mode, target_lang=target_lang)
             return resp.content, None, resp.to_trace()

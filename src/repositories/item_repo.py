@@ -444,12 +444,12 @@ class ItemRepository(BaseRepository[Item]):
             select(Item)
             .where(Item.user_id == user_id)
             .where(Item.is_deleted.is_(False))
-            .order_by(func.random())
-            .limit(limit)
         )
 
         if exclude_ids:
             stmt = stmt.where(Item.item_id.notin_(exclude_ids))
+
+        stmt = stmt.order_by(func.random()).limit(limit)
 
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

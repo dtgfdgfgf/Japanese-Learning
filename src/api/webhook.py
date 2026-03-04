@@ -9,8 +9,8 @@ T049: Wire up "練習" command to PracticeService
 
 import asyncio
 import enum
+import json
 import logging
-import os
 import time
 import unicodedata
 from collections.abc import Callable
@@ -25,6 +25,7 @@ from linebot.v3.webhooks import (
     TextMessageContent,
 )
 
+from src.config import settings
 from src.database import get_session
 from src.lib.line_client import build_mode_quick_replies, get_line_client
 from src.lib.llm_client import UsageContext, usage_context_var
@@ -352,7 +353,7 @@ _background_tasks: set[asyncio.Task[None]] = set()
 
 # Edge Case 28: Webhook 去重（in-memory TTL set）
 # ⚠️ 假設單 worker 部署：in-memory dedup 不跨 process 共享
-_processed_events: dict[str, float] = {}  # {webhook_event_id: timestamp}
+_processed_events: dict[str, float] = {}  # {webhook_event_id: timestamp}（Python 3.7+ 維持插入順序）
 _EVENT_DEDUP_TTL = 60  # 60 秒內的重複事件視為 retry
 _MAX_DEDUP_EVENTS = 10000  # dedup dict 最大條目數
 
@@ -362,19 +363,25 @@ def _is_duplicate_event(event_id: str | None) -> bool:
     if not event_id:
         return False
     now = time.monotonic()
-    # 清理過期條目（懶惰清理，每次檢查時順便清）
-    expired = [k for k, v in _processed_events.items() if now - v > _EVENT_DEDUP_TTL]
-    for k in expired:
-        del _processed_events[k]
-    # 超過上限時清除最舊的一半
-    if len(_processed_events) >= _MAX_DEDUP_EVENTS:
-        oldest = sorted(_processed_events, key=lambda eid: _processed_events[eid])[:_MAX_DEDUP_EVENTS // 2]
-        for k in oldest:
-            del _processed_events[k]
+
     if event_id in _processed_events:
-        logger.info(f"Duplicate webhook event detected: {event_id[:16]}...")
+        logger.info("Duplicate webhook event detected: %s...", event_id[:16])
         return True
+
     _processed_events[event_id] = now
+
+    # 惰性清理：僅在超過上限時批次清除（利用 dict 插入順序）
+    if len(_processed_events) >= _MAX_DEDUP_EVENTS:
+        cutoff = now - _EVENT_DEDUP_TTL
+        stale_keys = [k for k, v in _processed_events.items() if v < cutoff]
+        for k in stale_keys:
+            del _processed_events[k]
+        # 若清完過期仍超限，移除最舊的一半
+        if len(_processed_events) >= _MAX_DEDUP_EVENTS:
+            to_remove = list(_processed_events.keys())[: len(_processed_events) // 2]
+            for k in to_remove:
+                del _processed_events[k]
+
     return False
 
 
@@ -406,7 +413,7 @@ async def handle_webhook(
 
     # Production：背景處理，立即回 200 避免 LINE webhook timeout（冷啟動防護）
     # 測試：同步等待，確保 mock assert 正確
-    background = os.environ.get("RENDER_EXTERNAL_HOSTNAME") is not None
+    background = settings.is_production
 
     for event in events:
         if isinstance(event, MessageEvent):
@@ -433,9 +440,11 @@ async def _with_user_lock(event: MessageEvent | PostbackEvent, handler: Callable
     背景安全處理，確保例外不會遺失。
     """
     try:
-        user_id = event.source.user_id if event.source else None
-        if user_id:
-            if user_id not in _user_locks:
+        raw_user_id = event.source.user_id if event.source else None
+        if raw_user_id:
+            # 使用 hashed user ID 作為 key，避免在記憶體中保留原始 LINE user ID
+            lock_key = hash_user_id(raw_user_id)
+            if lock_key not in _user_locks:
                 # 超過上限時清除最舊的一半條目
                 if len(_user_locks) >= _MAX_USER_LOCKS:
                     keys_to_remove = list(_user_locks.keys())[: _MAX_USER_LOCKS // 2]
@@ -443,14 +452,14 @@ async def _with_user_lock(event: MessageEvent | PostbackEvent, handler: Callable
                         # 只清除未被佔用的 lock
                         if not _user_locks[k].locked():
                             del _user_locks[k]
-                _user_locks[user_id] = asyncio.Lock()
-            lock = _user_locks[user_id]
+                _user_locks[lock_key] = asyncio.Lock()
+            lock = _user_locks[lock_key]
             async with lock:
                 await handler(event)
         else:
             await handler(event)
     except Exception as e:
-        logger.exception(f"Background event handler failed: {e}")
+        logger.exception("Background event handler failed: %s", e)
 
 
 async def handle_message_event(event: MessageEvent) -> None:
@@ -519,7 +528,7 @@ async def handle_message_event(event: MessageEvent) -> None:
                         profile.mode, profile.target_lang, hashed_uid[:8],
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to load user profile, using defaults: {e}")
+                    logger.warning("Failed to load user profile, using defaults: %s", e)
 
                 # 檢查 pending_delete / pending_save 狀態
                 user_state_repo = UserStateRepository(session)
@@ -541,7 +550,7 @@ async def handle_message_event(event: MessageEvent) -> None:
                             mode_saved = True
                             logger.info("Mode switched to %s for user %s", mode_key, hashed_uid[:8])
                         except Exception as e:
-                            logger.warning(f"Failed to set mode: {e}")
+                            logger.warning("Failed to set mode: %s", e)
 
                 # 語言切換需在 reply 前完成
                 if parsed.command_type == CommandType.SET_LANG:
@@ -554,11 +563,11 @@ async def handle_message_event(event: MessageEvent) -> None:
                             lang_saved = True
                             logger.info("Target lang switched to %s for user %s", lang_key, hashed_uid[:8])
                         except Exception as e:
-                            logger.warning(f"Failed to set target_lang: {e}")
+                            logger.warning("Failed to set target_lang: %s", e)
                     else:
-                        logger.warning(f"Could not resolve lang_key from: {parsed.keyword}")
+                        logger.warning("Could not resolve lang_key from: %s", parsed.keyword)
         except Exception as e:
-            logger.warning(f"Failed to open pre-dispatch session: {e}")
+            logger.warning("Failed to open pre-dispatch session: %s", e)
 
         # === Dispatch ===
         # 優先處理 pending_delete 狀態（必須在 pending_save 之前，否則 "1" 會被誤判）
@@ -612,9 +621,14 @@ async def handle_message_event(event: MessageEvent) -> None:
                     mode=current_mode,
                     target_lang=target_lang,
                 )
-                # 在回覆前加上取消通知
+                # 在回覆前加上取消通知（解析 JSON 格式取出實際單字）
                 if discarded_word:
-                    notice = Messages.format("PENDING_DISCARDED", word=discarded_word)
+                    try:
+                        data = json.loads(discarded_word)
+                        display_word = data["word"] if isinstance(data, dict) and "word" in data else discarded_word
+                    except (json.JSONDecodeError, TypeError):
+                        display_word = discarded_word
+                    notice = Messages.format("PENDING_DISCARDED", word=display_word)
                     response = f"{notice}\n\n{response}"
         elif parsed.command_type == CommandType.CONFIRM_SAVE and not has_pending_save:
             # 輸入「1」但無 pending_save → 明確告知可能已過期
@@ -670,7 +684,7 @@ async def handle_message_event(event: MessageEvent) -> None:
                         truncated_text = text[:5000] if len(text) > 5000 else text
                         await user_state_repo.set_last_message(hashed_uid, truncated_text)
             except Exception as e:
-                logger.warning(f"Failed in post-dispatch session: {e}")
+                logger.warning("Failed in post-dispatch session: %s", e)
 
         # 組裝 footer
         footer = format_usage_footer(
@@ -701,7 +715,7 @@ async def handle_message_event(event: MessageEvent) -> None:
 
     except Exception as e:
         # 最後防線：確保使用者至少收到回覆
-        logger.exception(f"Unhandled error in message handler: {e}")
+        logger.exception("Unhandled error in message handler: %s", e)
         try:
             replied = await line_client.reply_message(
                 reply_token, Messages.ERROR_GENERIC
@@ -739,7 +753,7 @@ async def handle_postback_event(event: PostbackEvent) -> None:
                     daily_used = profile.daily_used_tokens or 0
                     daily_cap = profile.daily_cap_tokens_free or 50000
             except Exception as e:
-                logger.warning(f"Failed to set mode via postback: {e}")
+                logger.warning("Failed to set mode via postback: %s", e)
 
             confirm_msg = format_mode_switch_confirm(mode)
 
@@ -762,9 +776,9 @@ async def handle_postback_event(event: PostbackEvent) -> None:
                     user_id, full_response, quick_reply
                 )
         else:
-            logger.warning(f"Unknown postback: {event.postback.data if event.postback else 'None'}")
+            logger.warning("Unknown postback: %s", event.postback.data if event.postback else "None")
     except Exception as e:
-        logger.exception(f"Unhandled error in postback handler: {e}")
+        logger.exception("Unhandled error in postback handler: %s", e)
         try:
             replied = await line_client.reply_message(
                 reply_token, Messages.ERROR_GENERIC
@@ -887,7 +901,7 @@ async def _auto_extract(
                 parts.append(f"{summary.grammar_count} 個文法")
             return " 和 ".join(parts)
     except Exception as e:
-        logger.error(f"Auto-extract failed for doc {doc_id}: {e}")
+        logger.error("Auto-extract failed for doc %s: %s", doc_id, e)
         return None
 
 
@@ -1012,7 +1026,7 @@ async def _handle_confirm_save(
 
             return Messages.format("WORD_SAVE_AND_EXTRACT", word=pending_word)
         except Exception as e:
-            logger.warning(f"Direct item creation failed, falling back to auto-extract: {e}")
+            logger.warning("Direct item creation failed, falling back to auto-extract: %s", e)
 
     # 無 item 或直接建立失敗 → auto-extract
     if doc_id:
@@ -1048,7 +1062,7 @@ async def _handle_search(line_user_id: str, keyword: str | None) -> str:
             return _format_search_results(items)
 
         except Exception as e:
-            logger.error(f"Search failed: {e}")
+            logger.error("Search failed: %s", e)
             return Messages.ERROR_SEARCH
 
 
@@ -1068,7 +1082,7 @@ async def _handle_practice(line_user_id: str, mode: str = "free", target_lang: s
             )
             return message
         except Exception as e:
-            logger.error(f"Practice session creation failed: {e}")
+            logger.error("Practice session creation failed: %s", e)
             return Messages.ERROR_PRACTICE
 
 
@@ -1084,7 +1098,7 @@ async def _handle_cost(line_user_id: str) -> str:
             result = await cost_service.get_usage_summary(hashed_uid)
             return result.message
         except Exception as e:
-            logger.error(f"Cost query failed: {e}")
+            logger.error("Cost query failed: %s", e)
             return Messages.ERROR_COST
 
 
@@ -1100,7 +1114,7 @@ async def _handle_stats(line_user_id: str) -> str:
             result = await stats_service.get_stats_summary(hashed_uid)
             return result.message
         except Exception as e:
-            logger.error(f"Stats query failed: {e}")
+            logger.error("Stats query failed: %s", e)
             return Messages.ERROR_STATS
 
 
@@ -1133,7 +1147,7 @@ async def _handle_list_items(line_user_id: str, keyword: str | None) -> str:
             return _format_list_items(items, type_filter)
 
         except Exception as e:
-            logger.error(f"List items failed: {e}")
+            logger.error("List items failed: %s", e)
             return Messages.ERROR_LIST_ITEMS
 
 
@@ -1189,7 +1203,7 @@ async def _handle_practice_answer(hashed_user_id: str, answer_text: str, mode: s
             )
             return message
         except Exception as e:
-            logger.error(f"Practice answer submission failed: {e}")
+            logger.error("Practice answer submission failed: %s", e)
             return Messages.ERROR_PRACTICE_ANSWER
 
 
@@ -1263,7 +1277,7 @@ async def _handle_delete_item(line_user_id: str, keyword: str | None) -> str:
             )
 
         except Exception as e:
-            logger.error(f"Delete item failed: {e}")
+            logger.error("Delete item failed: %s", e)
             return Messages.ERROR_DELETE
 
 
@@ -1297,7 +1311,7 @@ def _build_delete_candidates(items: "Sequence[Item]") -> list[dict[str, str]]:
 
     candidates: list[dict[str, str]] = []
     for item in items:
-        label = DeleteService._format_item_label(item)
+        label = DeleteService.format_item_label(item)
         candidates.append({"item_id": str(item.item_id), "label": label})
     return candidates
 
@@ -1341,7 +1355,7 @@ async def _handle_delete_confirm(line_user_id: str) -> str:
             _, message = await delete_service.clear_all_data(hashed_user_id)
             return message
         except Exception as e:
-            logger.error(f"Clear all failed: {e}")
+            logger.error("Clear all failed: %s", e)
             return Messages.ERROR_CLEAR
 
 
@@ -1415,7 +1429,7 @@ async def _handle_unknown(
                 logger.warning("Failed to write chat LLM trace to DB", exc_info=True)
             return chat_resp.content
         except Exception as e:
-            logger.error(f"Chat response failed: {e}")
+            logger.error("Chat response failed: %s", e)
             return Messages.ERROR_GENERIC
 
     # UNKNOWN — fallback
@@ -1465,8 +1479,10 @@ async def _handle_word_input(
                 )
                 if word_trace:
                     llm_traces.append((word_trace, "word_explanation"))
-            except Exception:
-                return Messages.ERROR_API_CALL
+            except Exception as e:
+                logger.exception("Word explanation failed (multi-word first=%s)", first_word)
+                err_hint = f"{type(e).__name__}: {str(e)[:80]}"
+                return f"{Messages.ERROR_API_CALL}\n({err_hint})"
             async with get_session() as session:
                 user_state_repo = UserStateRepository(session)
                 if extracted_item:
@@ -1494,8 +1510,10 @@ async def _handle_word_input(
             )
             if word_trace:
                 llm_traces.append((word_trace, "word_explanation"))
-        except Exception:
-            return Messages.ERROR_API_CALL
+        except Exception as e:
+            logger.exception("Word explanation failed (single word=%s)", word)
+            err_hint = f"{type(e).__name__}: {str(e)[:80]}"
+            return f"{Messages.ERROR_API_CALL}\n({err_hint})"
         async with get_session() as session:
             user_state_repo = UserStateRepository(session)
             if extracted_item:
@@ -1507,7 +1525,7 @@ async def _handle_word_input(
         return Messages.format("WORD_EXPLANATION", explanation=display)
 
     except Exception as e:
-        logger.error(f"Word input handling failed: {e}")
+        logger.error("Word input handling failed: %s", e)
         return Messages.ERROR_GENERIC
 
     finally:

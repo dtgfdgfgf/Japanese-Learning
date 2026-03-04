@@ -70,21 +70,6 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         await session.close()
 
 
-async def get_session_dependency() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency for database sessions.
-
-    Usage:
-        @app.get("/items")
-        async def get_items(session: AsyncSession = Depends(get_session_dependency)):
-            ...
-
-    Yields:
-        AsyncSession: Database session for the request lifecycle.
-    """
-    async with get_session() as session:
-        yield session
-
-
 async def init_db() -> None:
     """Initialize database tables.
 

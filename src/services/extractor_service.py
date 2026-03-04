@@ -82,7 +82,7 @@ class ExtractorService:
             raise ValueError(f"Document access denied: {doc_id}")
 
         if document.parse_status == "parsed":
-            logger.warning(f"Document {doc_id} already parsed")
+            logger.warning("Document %s already parsed", doc_id)
             return ExtractorResponse(
                 doc_id=doc_id,
                 items=[],
@@ -101,7 +101,7 @@ class ExtractorService:
         # 允許：偵測到的語言與目標一致、unknown、或 mixed
         if lang not in (target_lang, "unknown", "mixed"):
             lang_name = {"ja": "日文", "en": "英文"}.get(target_lang, target_lang)
-            logger.warning(f"Document {doc_id} lang mismatch: detected={lang}, target={target_lang}")
+            logger.warning("Document %s lang mismatch: detected=%s, target=%s", doc_id, lang, target_lang)
             await self._update_document_status(doc_id, "skipped", lang)
             return ExtractorResponse(
                 doc_id=doc_id,
@@ -124,7 +124,7 @@ class ExtractorService:
                     operation="extraction",
                 )
         except Exception as e:
-            logger.error(f"LLM extraction failed for {doc_id}: {e}")
+            logger.error("LLM extraction failed for %s: %s", doc_id, e)
             await self._update_document_status(doc_id, "failed", lang)
             return ExtractorResponse(
                 doc_id=doc_id,
@@ -146,9 +146,9 @@ class ExtractorService:
                     confidence=item.confidence,
                 )
                 saved_items.append(item)
-                logger.debug(f"Saved item: {item.key}")
+                logger.debug("Saved item: %s", item.key)
             except Exception as e:
-                logger.error(f"Failed to save item {item.key}: {e}")
+                logger.error("Failed to save item %s: %s", item.key, e)
 
         # 所有 item 都保存失敗 → 標記為 failed
         if items and not saved_items:
@@ -206,7 +206,7 @@ class ExtractorService:
         )
 
         # 記錄 LLM trace 供 debug 用
-        logger.debug(f"LLM extraction trace: {llm_trace.to_dict()}")
+        logger.debug("LLM extraction trace: %s", llm_trace.to_dict())
 
         # Parse response
         items = []
@@ -217,7 +217,7 @@ class ExtractorService:
                 item = ExtractedItem(**raw_item)
                 items.append(item)
             except Exception as e:
-                logger.warning(f"Failed to parse item: {e}, data: {raw_item}")
+                logger.warning("Failed to parse item: %s, data: %s", e, raw_item)
 
         return items, llm_trace
 

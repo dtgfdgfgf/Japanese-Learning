@@ -111,6 +111,7 @@ class PracticeLog(Base):
             "item_id",
             created_at.desc(),
         ),
+        Index("idx_practice_logs_item_id", "item_id"),
     )
 
     def __repr__(self) -> str:

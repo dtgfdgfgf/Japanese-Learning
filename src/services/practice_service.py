@@ -95,7 +95,7 @@ class PracticeService:
         items = await self._select_items_for_practice(user_id, question_count)
 
         if len(items) < question_count:
-            logger.warning(f"Only got {len(items)} items for user {user_id[:8]}")
+            logger.warning("Only got %d items for user %s", len(items), user_id[:8])
 
         # Generate questions
         questions = []
@@ -260,7 +260,7 @@ class PracticeService:
                     return q
             return None
         else:
-            logger.warning(f"Unknown item type: {item_type}")
+            logger.warning("Unknown item type: %s", item_type)
             return None
 
     def _generate_vocab_question(

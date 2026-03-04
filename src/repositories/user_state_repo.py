@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.user_state import UserStateModel
@@ -39,20 +40,37 @@ class UserStateRepository:
     async def _get_or_create(self, user_id: str) -> UserStateModel:
         """取得或建立 user state 記錄。
 
-        若記錄曾被 soft delete，則恢復（設 is_deleted=False）。
+        若記錄曾被 soft delete，則恢復（設 is_deleted=False 並清除舊暫存狀態）。
+        使用 savepoint + IntegrityError retry 防止並發建立衝突。
         """
         stmt = select(UserStateModel).where(UserStateModel.user_id == user_id)
         result = await self.session.execute(stmt)
         row = result.scalar_one_or_none()
         if row:
             if row.is_deleted:
+                # 復活時清除所有暫存狀態，避免舊 pending 資料殘留
                 row.is_deleted = False
+                row.last_message = None
+                row.last_message_at = None
+                row.delete_confirm_at = None
+                row.pending_save_content = None
+                row.pending_save_at = None
+                row.pending_delete_items = None
+                row.pending_delete_at = None
                 await self.session.flush()
             return row
-        row = UserStateModel(user_id=user_id)
-        self.session.add(row)
-        await self.session.flush()
-        return row
+        try:
+            async with self.session.begin_nested():
+                row = UserStateModel(user_id=user_id)
+                self.session.add(row)
+                await self.session.flush()
+            return row
+        except IntegrityError:
+            # 並發建立衝突，重新查詢
+            result = await self.session.execute(
+                select(UserStateModel).where(UserStateModel.user_id == user_id)
+            )
+            return result.scalar_one()
 
     # ---- last_message ----
 
@@ -269,11 +287,12 @@ class UserStateRepository:
             await self.clear_pending_delete(user_id)
             return None
 
-        try:
-            return json.loads(row.pending_delete_items)
-        except (json.JSONDecodeError, TypeError):
+        # JSONB 欄位自動反序列化，直接回傳
+        items = row.pending_delete_items
+        if not isinstance(items, list):
             await self.clear_pending_delete(user_id)
             return None
+        return items
 
     async def set_pending_delete(
         self, user_id: str, items: list[dict[str, str]]
@@ -285,7 +304,7 @@ class UserStateRepository:
             items: 待確認刪除項目列表 [{item_id, label}]
         """
         row = await self._get_or_create(user_id)
-        row.pending_delete_items = json.dumps(items, ensure_ascii=False)
+        row.pending_delete_items = items  # JSONB 欄位自動序列化
         row.pending_delete_at = datetime.now(UTC)
         # 互斥：清除 pending_save
         row.pending_save_content = None

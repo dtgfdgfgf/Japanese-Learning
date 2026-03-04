@@ -32,8 +32,12 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         Returns:
             Response with request ID header
         """
-        # Generate or extract request ID
-        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        # Generate or extract request ID（限制長度 ≤ 128，僅允許安全字元）
+        raw_id = request.headers.get("X-Request-ID")
+        if raw_id and len(raw_id) <= 128 and raw_id.replace("-", "").replace("_", "").isalnum():
+            request_id = raw_id
+        else:
+            request_id = str(uuid.uuid4())
 
         # Store in request state for use in handlers
         request.state.request_id = request_id
@@ -43,7 +47,8 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
         try:
             logger.info(
-                f"Request started: {request.method} {request.url.path}",
+                "Request started: %s %s",
+                request.method, request.url.path,
                 extra=logger_extra,
             )
 
@@ -53,7 +58,8 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             response.headers["X-Request-ID"] = request_id
 
             logger.info(
-                f"Request completed: {response.status_code}",
+                "Request completed: %s",
+                response.status_code,
                 extra=logger_extra,
             )
 
@@ -61,7 +67,8 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 
         except Exception as e:
             logger.exception(
-                f"Unhandled exception: {type(e).__name__}: {e}",
+                "Unhandled exception: %s: %s",
+                type(e).__name__, e,
                 extra=logger_extra,
             )
 

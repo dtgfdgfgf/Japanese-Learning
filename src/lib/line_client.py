@@ -283,6 +283,17 @@ class LineClient:
             logger.error("Failed to push LINE message with quick_reply: %s", e)
             return False
 
+    def close(self) -> None:
+        """關閉底層 HTTP 連線，釋放資源。
+
+        應在應用程式 shutdown 時呼叫。
+        """
+        try:
+            if self._api_client:
+                self._api_client.close()
+        except Exception:
+            pass  # 關閉失敗不影響 shutdown
+
     def get_reply_token(self, event: MessageEvent) -> str | None:
         """Extract reply token from a message event.
 
@@ -342,3 +353,14 @@ def get_line_client() -> LineClient:
     if _line_client is None:
         _line_client = LineClient()
     return _line_client
+
+
+def close_line_client() -> None:
+    """關閉 LINE client 連線，釋放底層 HTTP 資源。
+
+    應在應用程式 shutdown 時呼叫。
+    """
+    global _line_client
+    if _line_client is not None:
+        _line_client.close()
+        _line_client = None

@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     """
     # Startup
-    logger.info(f"Starting application in {settings.app_env} mode")
+    logger.info("Starting application in %s mode", settings.app_env)
 
     # Try to initialize database, but don't fail startup if it times out
     try:
@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
             await init_db()
             logger.info("Database initialized")
     except Exception as e:
-        logger.warning(f"Database initialization skipped: {e}")
+        logger.warning("Database initialization skipped: %s", e)
         # Don't fail startup - database will connect on first request
 
     # === Cold start 預熱：減少首次請求延遲 ===
@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
             await session.execute(sa_text("SELECT 1"))
         logger.info("DB connection pool warmed up")
     except Exception as e:
-        logger.warning(f"DB warmup skipped: {e}")
+        logger.warning("DB warmup skipped: %s", e)
 
     # 預熱 LLM client（僅建立 HTTP client，不發真實請求）
     try:
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
         get_llm_client()
         logger.info("LLM client initialized")
     except Exception as e:
-        logger.warning(f"LLM client warmup skipped: {e}")
+        logger.warning("LLM client warmup skipped: %s", e)
 
     # 預熱 LINE client singleton
     try:
@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI):
         get_line_client()
         logger.info("LINE client initialized")
     except Exception as e:
-        logger.warning(f"LINE client warmup skipped: {e}")
+        logger.warning("LINE client warmup skipped: %s", e)
 
     # 啟動 keep-alive task（僅 Render 環境生效）
     keep_alive_task = asyncio.create_task(_keep_alive())
@@ -119,8 +119,10 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down application")
+    from src.lib.line_client import close_line_client
     from src.lib.llm_client import close_llm_client
 
+    close_line_client()
     await close_llm_client()
     await close_db()
 
@@ -145,7 +147,7 @@ app.add_middleware(RequestIdMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.is_development else [],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -17,9 +17,14 @@
     msg = get_message("ERROR_GENERIC", locale="ja")
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.repositories.api_usage_log_repo import UsageSummary
 
 
 class Locale(str, Enum):
@@ -664,7 +669,7 @@ _PROVIDER_DISPLAY_NAMES: dict[str, str] = {
 }
 
 
-def _format_provider_grouped(summary_list: list) -> list[str]:
+def _format_provider_grouped(summary_list: list[UsageSummary]) -> list[str]:
     """將 UsageSummary 列表按 provider 分組格式化。"""
     from collections import defaultdict
 
@@ -709,7 +714,7 @@ def _format_provider_grouped(summary_list: list) -> list[str]:
     return lines
 
 
-def _format_mode_grouped(summary_list: list) -> list[str]:
+def _format_mode_grouped(summary_list: list[Any]) -> list[str]:
     """將模式摘要列表格式化。"""
     lines: list[str] = []
     for s in summary_list:
@@ -724,12 +729,12 @@ def _format_mode_grouped(summary_list: list) -> list[str]:
 
 
 def format_cost_summary(
-    all_time_summary: list,
-    month_summary: list,
+    all_time_summary: list[UsageSummary],
+    month_summary: list[UsageSummary],
     all_time_total: float,
     month_total: float,
-    all_time_mode_summary: list | None = None,
-    month_mode_summary: list | None = None,
+    all_time_mode_summary: list[Any] | None = None,
+    month_mode_summary: list[Any] | None = None,
 ) -> str:
     """格式化 API 用量摘要訊息（按 provider 分組）。
 

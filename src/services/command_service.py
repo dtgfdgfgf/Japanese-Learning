@@ -154,7 +154,7 @@ class CommandService:
                 parse_status="deferred",
             )
 
-            logger.info(f"Saved raw message and document: {document.doc_id}")
+            logger.info("Saved raw message and document: %s", document.doc_id)
 
             # 使用截斷內容作為預覽
             content_preview = truncate_content_preview(content_text)
@@ -166,7 +166,7 @@ class CommandService:
             )
 
         except Exception as e:
-            logger.exception(f"Failed to save raw: {e}")
+            logger.exception("Failed to save raw: %s", e)
             return CommandResult.fail(
                 message=Messages.ERROR_SAVE,
                 error=str(e),

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 
 
 # Set test environment before importing app modules
+os.environ["APP_ENV"] = "development"  # 確保測試環境不使用 background 模式
 os.environ["LINE_CHANNEL_SECRET"] = "test_secret_for_testing_only"
 os.environ["LINE_CHANNEL_ACCESS_TOKEN"] = "test_access_token"
 os.environ["ANTHROPIC_API_KEY"] = "test_anthropic_key"

@@ -8,7 +8,7 @@ from datetime import datetime
 from uuid import uuid4
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -73,7 +73,7 @@ class ApiUsageLog(Base):
         comment="Output token count",
     )
     cost_usd: Mapped[float] = mapped_column(
-        Float,
+        Numeric(10, 6),
         nullable=False,
         default=0.0,
         comment="Calculated cost in USD",

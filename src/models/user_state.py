@@ -7,6 +7,7 @@ from datetime import datetime
 
 import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.database import Base
@@ -54,10 +55,10 @@ class UserStateModel(Base):
         nullable=True,
         comment="待確認入庫設定時間",
     )
-    pending_delete_items: Mapped[str | None] = mapped_column(
-        Text,
+    pending_delete_items: Mapped[dict | list | None] = mapped_column(
+        JSONB,
         nullable=True,
-        comment="待確認刪除的項目列表（JSON）",
+        comment="待確認刪除的項目列表",
     )
     pending_delete_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

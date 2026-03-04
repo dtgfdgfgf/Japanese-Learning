@@ -31,7 +31,7 @@ class LLMResponse:
 
     content: str
     model: str
-    provider: str  # "anthropic" or "GEMINI"
+    provider: str  # "anthropic" or "google"
     input_tokens: int
     output_tokens: int
     latency_ms: int
@@ -145,8 +145,8 @@ class LLMClient:
             self._gemini_client = None
             self._gemini_configured = False
 
-    # Anthropic API 必須傳 max_tokens，設為模型上限以不限制輸出
-    ANTHROPIC_MAX_TOKENS = 8192
+    # Anthropic API 必須傳 max_tokens，預設上限用於一般呼叫
+    DEFAULT_MAX_TOKENS = 4096
 
     async def _call_anthropic(
         self,
@@ -156,6 +156,7 @@ class LLMClient:
         json_mode: bool = False,
         model: str | None = None,
         timeout: float | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Call Anthropic API with timeout.
 
@@ -164,6 +165,7 @@ class LLMClient:
                        JSON 輸出由 system prompt 指示控制。
             model: 指定 model，預設使用 ANTHROPIC_MODEL。
             timeout: 覆蓋預設 timeout（秒）。
+            max_tokens: 覆蓋預設 max_tokens。
 
         Returns:
             Dict with content, input_tokens, output_tokens
@@ -172,7 +174,7 @@ class LLMClient:
         async with asyncio.timeout(timeout if timeout is not None else self.timeout):
             response = await self.anthropic_client.messages.create(
                 model=use_model,
-                max_tokens=self.ANTHROPIC_MAX_TOKENS,
+                max_tokens=max_tokens or self.DEFAULT_MAX_TOKENS,
                 temperature=temperature,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_message}],
@@ -194,12 +196,14 @@ class LLMClient:
         model: str = "gemini-3-pro-preview",
         json_mode: bool = False,
         timeout: float | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Call Google Gemini API（原生 async），含瞬態錯誤指數退避重試。
 
         Args:
             json_mode: 為 True 時設定 response_mime_type="application/json"。
             timeout: 覆蓋預設 timeout（秒）。
+            max_tokens: 覆蓋預設 max_output_tokens。
 
         Returns:
             Dict with content, input_tokens, output_tokens
@@ -210,7 +214,7 @@ class LLMClient:
         config_kwargs: dict[str, Any] = {
             "system_instruction": system_prompt,
             "temperature": temperature,
-            "max_output_tokens": self.ANTHROPIC_MAX_TOKENS,  # 與 Anthropic 一致的 output 上限
+            "max_output_tokens": max_tokens or self.DEFAULT_MAX_TOKENS,
         }
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
@@ -232,13 +236,14 @@ class LLMClient:
                     "input_tokens": usage.prompt_token_count if usage else 0,
                     "output_tokens": usage.candidates_token_count if usage else 0,
                 }
-            except GeminiServerError as e:
+            except (GeminiServerError, TimeoutError) as e:
                 last_error = e
                 if attempt < _GEMINI_MAX_RETRIES:
                     delay = _GEMINI_RETRY_BASE_DELAY * (2 ** attempt)
+                    err_code = getattr(e, "code", "timeout")
                     logger.warning(
-                        "Gemini %d 錯誤，第 %d/%d 次重試（%ds 後）: %s",
-                        e.code, attempt + 1, _GEMINI_MAX_RETRIES, delay, e,
+                        "Gemini %s 錯誤，第 %d/%d 次重試（%ds 後）: %s",
+                        err_code, attempt + 1, _GEMINI_MAX_RETRIES, delay, e,
                     )
                     await asyncio.sleep(delay)
 
@@ -253,6 +258,7 @@ class LLMClient:
         temperature: float = 0.7,
         json_mode: bool = False,
         timeout: float | None = None,
+        max_tokens: int | None = None,
     ) -> LLMResponse:
         """根據模式選擇 provider/model 完成 LLM 呼叫。
 
@@ -264,6 +270,7 @@ class LLMClient:
             user_message: 使用者輸入
             temperature: 取樣溫度
             json_mode: 是否要求 JSON 輸出
+            max_tokens: 最大輸出 token 數（預設 DEFAULT_MAX_TOKENS）
 
         Returns:
             LLMResponse
@@ -282,6 +289,7 @@ class LLMClient:
             temperature=temperature,
             json_mode=json_mode,
             timeout=timeout,
+            max_tokens=max_tokens,
         )
         latency_ms = int((time.monotonic() - start_time) * 1000)
         resp = LLMResponse(
@@ -304,6 +312,7 @@ class LLMClient:
         temperature: float,
         json_mode: bool = False,
         timeout: float | None = None,
+        max_tokens: int | None = None,
     ) -> dict[str, Any]:
         """統一的 provider 呼叫分派。"""
         if provider == "anthropic":
@@ -314,6 +323,7 @@ class LLMClient:
                 json_mode=json_mode,
                 model=model,
                 timeout=timeout,
+                max_tokens=max_tokens,
             )
         elif provider == "google":
             return await self._call_google(
@@ -323,6 +333,7 @@ class LLMClient:
                 model=model,
                 json_mode=json_mode,
                 timeout=timeout,
+                max_tokens=max_tokens,
             )
         else:
             raise ValueError(f"Unknown provider: {provider}")
@@ -334,6 +345,7 @@ class LLMClient:
         user_message: str,
         temperature: float = 0.3,
         timeout: float | None = None,
+        max_tokens: int | None = None,
     ) -> tuple[dict[str, Any], LLMTrace]:
         """根據模式完成 JSON 回應，與 complete_json 相同解析邏輯。"""
         response = await self.complete_with_mode(
@@ -343,6 +355,7 @@ class LLMClient:
             temperature=temperature,
             json_mode=True,
             timeout=timeout,
+            max_tokens=max_tokens,
         )
 
         content = response.content.strip()

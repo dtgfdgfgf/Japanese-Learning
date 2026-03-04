@@ -163,6 +163,8 @@ def format_extractor_request(
     """
     # 截斷過長輸入，防止 token 消耗失控
     truncated = raw_text[:5000] if len(raw_text) > 5000 else raw_text
+    # 跳脫 closing tag 防止使用者輸入注入指令
+    truncated = truncated.replace("</user_input>", "&lt;/user_input&gt;")
     lang_label = _LANG_LABELS.get(lang, "Japanese")
     return f"""Please analyze the following {lang_label} text and extract vocabulary and grammar items.
 

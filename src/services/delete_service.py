@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.document import Document
 from src.models.item import Item
 from src.models.practice_log import PracticeLog
+from src.models.practice_session import PracticeSessionModel
 from src.models.raw_message import RawMessage
 from src.repositories.item_repo import ItemRepository
 from src.templates.messages import (
@@ -55,11 +56,11 @@ class DeleteService:
         await self.item_repo.soft_delete(item_id)
 
         # 格式化 label
-        label = self._format_item_label(item)
+        label = self.format_item_label(item)
         return True, format_delete_item_success(label)
 
     @staticmethod
-    def _format_item_label(item: Item) -> str:
+    def format_item_label(item: Item) -> str:
         """格式化 item 的顯示標籤。"""
         payload = item.payload or {}
         if item.item_type == "vocab":
@@ -102,6 +103,10 @@ class DeleteService:
         # Soft delete all raw messages
         raws_deleted = await self._soft_delete_all(RawMessage, user_id)
         deleted_count += raws_deleted
+
+        # Soft delete all practice sessions
+        sessions_deleted = await self._soft_delete_all(PracticeSessionModel, user_id)
+        deleted_count += sessions_deleted
 
         logger.info(
             "User %s cleared all data: %d records",

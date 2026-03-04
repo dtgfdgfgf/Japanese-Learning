@@ -119,7 +119,7 @@ class UserProfileRepository:
     async def add_tokens(self, user_id: str, delta: int) -> UserProfile:
         """原子累加今日已使用 token 數。
 
-        使用 SQL 原子 increment 避免 race condition。
+        使用 SQL UPDATE ... RETURNING 一次完成更新與讀取，避免多次 round trip。
 
         Args:
             user_id: Hashed LINE user ID
@@ -133,18 +133,11 @@ class UserProfileRepository:
             .where(UserProfile.user_id == user_id)
             .where(UserProfile.is_deleted.is_(False))
             .values(daily_used_tokens=UserProfile.daily_used_tokens + delta)
+            .returning(UserProfile)
         )
-        await self.session.execute(stmt)
-        await self.session.flush()
-
-        # 重新讀取最新值（同樣過濾 soft-delete）
-        read_stmt = select(UserProfile).where(
-            UserProfile.user_id == user_id,
-            UserProfile.is_deleted.is_(False),
-        )
-        result = await self.session.execute(read_stmt)
+        result = await self.session.execute(stmt)
         profile = result.scalar_one_or_none()
         if profile is None:
             raise ValueError(f"UserProfile not found after token update: {user_id}")
-        await self.session.refresh(profile)
+        await self.session.flush()
         return profile
