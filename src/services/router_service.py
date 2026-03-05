@@ -248,7 +248,7 @@ class RouterService:
             LLMResponse（失敗時 raise，由呼叫端 try/except 處理）
         """
         lang_name = {"ja": "日語", "en": "英語"}.get(target_lang, "日語")
-        system_prompt = f"""你是一個友善的{lang_name}學習助手。
+        system_prompt = f"""你是一個友善的{lang_name}學習助手。回覆必須使用繁體中文（zh-TW）。
 
 請簡短回答用戶的{lang_name}學習相關問題。
 如果問題與{lang_name}學習無關，請禮貌地引導用戶使用學習功能。
@@ -396,6 +396,7 @@ class RouterService:
 
 ## VII. 風格要求（面向學習者）
 
+- 回覆必須使用繁體中文（zh-TW）
 - 優先給「一句話核心義」與「常見搭配」；避免一次灌太多義項
 - 中文說明精準、避免花俏
 - 不確定就直接說不確定，並告訴使用者「你需要什麼資訊才可確認」"""
@@ -522,6 +523,7 @@ class RouterService:
 
 ## V. 風格要求（面向學習者）
 
+- 回覆必須使用繁體中文（zh-TW）
 - 優先給「一句話核心義」與「常見搭配」；避免一次灌太多義項
 - 中文說明精準、避免花俏
 - 不確定就直接說不確定，並告訴使用者「你需要什麼資訊才可確認」
