@@ -29,6 +29,7 @@ class CommandType(str, Enum):
     EXIT_PRACTICE = "exit_practice"  # 結束練習
     WORD_SAVE = "word_save"  # 單字 入庫（直接入庫，不解釋）
     LIST_ITEMS = "list_items"  # 清單（列出所有項目）
+    COMPLETE_ARTICLE = "complete_article"  # 完成（結束文章閱讀模式）
     UNKNOWN = "unknown"  # 未知指令
 
 

@@ -92,6 +92,13 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "INPUT_NON_TEXT": "目前僅支援文字訊息 📝\n請將想查詢的內容以文字方式輸入",
     "INPUT_UNSUPPORTED_LANG": "目前支援日文和英文內容 🌐\n請輸入日文或英文的學習素材",
     
+    # ========== 文章閱讀模式 ==========
+    "ARTICLE_TRANSLATION_HEADER": "📖 全文翻譯：",
+    "ARTICLE_MODE_INSTRUCTIONS": "\n\n💡 如有想查的單字或文法，請直接輸入（中文或日文皆可）。\n處理完畢請輸入「完成」。",
+    "ARTICLE_MODE_EXIT": "✅ 已結束文章閱讀模式。",
+    "ARTICLE_MODE_EXPIRED": "⏰ 文章閱讀模式已逾時自動結束。",
+    "ARTICLE_WORD_SAVE_REMINDER": "\n\n💡 繼續輸入其他想查的單字/文法，或輸入「完成」結束。",
+
     # ========== 搜尋相關 ==========
     "SEARCH_HINT": "請提供查詢關鍵字，例如：查詢 考える",
     "SEARCH_NO_RESULT": "找不到「{keyword}」相關的項目 🔍",
@@ -183,6 +190,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 • 入庫 - 儲存上一則訊息的學習內容
 • <單字> save - 直接入庫指定單字（例：鋭い save）
 • 練習 - 開始練習題
+• 完成 - 結束文章閱讀模式
 • 結束練習（或 停止練習）- 中途結束練習
 • 查詢 <關鍵字> - 搜尋已入庫的內容
 • 清單 - 列出所有已入庫的單字和文法（可用「單字清單」或「文法清單」篩選）
@@ -197,8 +205,7 @@ _MESSAGES_ZH_TW: dict[str, str] = {
 
 💡 使用方式：
 ▸ 查單字：直接輸入單字 → 查看解釋 → 輸入「1」入庫
-▸ 學文章：貼上文章 → 輸入「入庫」→「練習」
-（入庫後會自動分析抽取單字和文法，長文章會自動入庫）""",
+▸ 學文章：貼上日文文章 → 查看翻譯 → 輸入想查的字 → 輸入「1」入庫 → 輸入「完成」結束""",
     "HELP_WITH_STATUS": "{help_message}\n\n⚙️ 目前模式：{mode_label}｜學習語言：{lang_label}",
     
     # ========== 隱私訊息 ==========
@@ -341,6 +348,13 @@ class Messages:
     # 清單
     LIST_ITEMS_EMPTY: str = _MESSAGES_ZH_TW["LIST_ITEMS_EMPTY"]
     ERROR_LIST_ITEMS: str = _MESSAGES_ZH_TW["ERROR_LIST_ITEMS"]
+
+    # 文章閱讀模式
+    ARTICLE_TRANSLATION_HEADER: str = _MESSAGES_ZH_TW["ARTICLE_TRANSLATION_HEADER"]
+    ARTICLE_MODE_INSTRUCTIONS: str = _MESSAGES_ZH_TW["ARTICLE_MODE_INSTRUCTIONS"]
+    ARTICLE_MODE_EXIT: str = _MESSAGES_ZH_TW["ARTICLE_MODE_EXIT"]
+    ARTICLE_MODE_EXPIRED: str = _MESSAGES_ZH_TW["ARTICLE_MODE_EXPIRED"]
+    ARTICLE_WORD_SAVE_REMINDER: str = _MESSAGES_ZH_TW["ARTICLE_WORD_SAVE_REMINDER"]
 
     # 導引
     FALLBACK_UNKNOWN: str = _MESSAGES_ZH_TW["FALLBACK_UNKNOWN"]

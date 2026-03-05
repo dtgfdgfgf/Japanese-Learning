@@ -65,6 +65,16 @@ class UserStateModel(Base):
         nullable=True,
         comment="待確認刪除設定時間",
     )
+    article_mode_text: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="文章閱讀模式原文（供查詞語境）",
+    )
+    article_mode_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="進入文章閱讀模式時間",
+    )
     is_deleted: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

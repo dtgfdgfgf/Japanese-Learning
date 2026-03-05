@@ -92,6 +92,7 @@ def _setup_dispatch_mocks(
     mock_user_state_repo.clear_pending_save = AsyncMock()
     mock_user_state_repo.clear_pending_delete = AsyncMock()
     mock_user_state_repo.set_last_message = AsyncMock()
+    mock_user_state_repo.get_article_mode = AsyncMock(return_value=None)
 
     return mock_line, mock_user_state_repo, mock_profile_repo
 

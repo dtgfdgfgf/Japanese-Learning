@@ -63,6 +63,7 @@ def _mock_user_state_repo(**kwargs: object) -> MagicMock:
     )
     repo.clear_delete_confirm = AsyncMock()
     repo.set_last_message = AsyncMock()
+    repo.get_article_mode = AsyncMock(return_value=None)
     # parse_pending_save_content：使用真實邏輯
     from src.repositories.user_state_repo import UserStateRepository
     repo.parse_pending_save_content = UserStateRepository.parse_pending_save_content.__get__(repo)
@@ -1025,11 +1026,11 @@ class TestUnknownRouterEdgeCases:
         result = await _handle_unknown("Utest", "한" * 3000, mode="free", target_lang="ja")
         assert "目前支援日文和英文" in result
 
-    async def test_supported_long_text_auto_saves(self) -> None:
-        """支援語言的長文本 >2000 → 自動入庫 + 自動抽取。"""
-        with patch("src.api.webhook._save_and_extract", new_callable=AsyncMock, return_value="已入庫：aaa...") as mock_save:
+    async def test_supported_long_text_routes_to_article(self) -> None:
+        """支援語言的長文本 >2000 → 文章翻譯模式。"""
+        with patch("src.api.webhook._handle_article_translation", new_callable=AsyncMock, return_value="📖 全文翻譯：\n翻譯結果") as mock_article:
             result = await _handle_unknown("Utest", "a" * 3000, mode="free", target_lang="ja")
-        mock_save.assert_awaited_once()
+        mock_article.assert_awaited_once()
 
 
 # ============================================================================

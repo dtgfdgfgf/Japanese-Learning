@@ -21,6 +21,12 @@ PENDING_SAVE_TIMEOUT = 300  # 5 分鐘
 # 待確認刪除逾時（秒）
 PENDING_DELETE_TIMEOUT = 300  # 5 分鐘
 
+# 文章閱讀模式逾時（秒）
+ARTICLE_MODE_TIMEOUT = 300  # 5 分鐘
+
+# 文章閱讀模式原文長度上限
+ARTICLE_MODE_MAX_LENGTH = 5000
+
 
 class UserStateRepository:
     """使用者暫存狀態的 DB 操作。"""
@@ -57,6 +63,8 @@ class UserStateRepository:
                 row.pending_save_at = None
                 row.pending_delete_items = None
                 row.pending_delete_at = None
+                row.article_mode_text = None
+                row.article_mode_at = None
                 await self.session.flush()
             return row
         try:
@@ -334,3 +342,73 @@ class UserStateRepository:
         """
         items = await self.get_pending_delete(user_id)
         return items is not None
+
+    # ---- article_mode ----
+
+    async def set_article_mode(self, user_id: str, text: str) -> None:
+        """進入文章閱讀模式，儲存原文供後續查詞語境使用。
+
+        同時清除 pending_save 和 pending_delete（互斥）。
+
+        Args:
+            user_id: Hashed LINE user ID
+            text: 日文原文（截斷至 ARTICLE_MODE_MAX_LENGTH）
+        """
+        row = await self._get_or_create(user_id)
+        row.article_mode_text = text[:ARTICLE_MODE_MAX_LENGTH]
+        row.article_mode_at = datetime.now(UTC)
+        # 互斥：清除 pending_save / pending_delete
+        row.pending_save_content = None
+        row.pending_save_at = None
+        row.pending_delete_items = None
+        row.pending_delete_at = None
+        await self.session.flush()
+
+    async def get_article_mode(self, user_id: str) -> str | None:
+        """取得文章閱讀模式原文（含 TTL 檢查）。
+
+        過期時自動清除並回傳 None。
+
+        Args:
+            user_id: Hashed LINE user ID
+
+        Returns:
+            原文文字，若不存在或已過期則回傳 None
+        """
+        stmt = select(
+            UserStateModel.article_mode_text,
+            UserStateModel.article_mode_at,
+        ).where(
+            UserStateModel.user_id == user_id,
+            UserStateModel.is_deleted.is_(False),
+        )
+        result = await self.session.execute(stmt)
+        row = result.one_or_none()
+
+        if not row or not row.article_mode_text or not row.article_mode_at:
+            return None
+
+        mode_at = row.article_mode_at
+        # 確保 timezone-aware 比較
+        if mode_at.tzinfo is None:
+            mode_at = mode_at.replace(tzinfo=UTC)
+
+        elapsed = (datetime.now(UTC) - mode_at).total_seconds()
+        if elapsed > ARTICLE_MODE_TIMEOUT:
+            await self.clear_article_mode(user_id)
+            return None
+
+        return row.article_mode_text
+
+    async def has_article_mode(self, user_id: str) -> bool:
+        """檢查是否在文章閱讀模式中（含 TTL）。"""
+        text = await self.get_article_mode(user_id)
+        return text is not None
+
+    async def clear_article_mode(self, user_id: str) -> None:
+        """清除文章閱讀模式狀態。"""
+        row = await self._get_active(user_id)
+        if row:
+            row.article_mode_text = None
+            row.article_mode_at = None
+            await self.session.flush()

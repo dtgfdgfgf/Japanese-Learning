@@ -82,6 +82,7 @@ PENDING_SAFE_COMMANDS = {
     CommandType.EXIT_PRACTICE,
     CommandType.WORD_SAVE,
     CommandType.LIST_ITEMS,
+    CommandType.COMPLETE_ARTICLE,
 }
 
 
@@ -516,6 +517,8 @@ async def handle_message_event(event: MessageEvent) -> None:
         has_session = False
         has_pending_save = False
         has_pending_delete = False
+        has_article_mode = False
+        article_text: str | None = None
         mode_saved = parsed.command_type != CommandType.MODE_SWITCH
         lang_saved = parsed.command_type != CommandType.SET_LANG
         try:
@@ -535,10 +538,12 @@ async def handle_message_event(event: MessageEvent) -> None:
                 except Exception as e:
                     logger.warning("Failed to load user profile, using defaults: %s", e)
 
-                # 檢查 pending_delete / pending_save 狀態
+                # 檢查 pending_delete / pending_save / article_mode 狀態
                 user_state_repo = UserStateRepository(session)
                 has_pending_delete = await user_state_repo.has_pending_delete(hashed_uid)
                 has_pending_save = await user_state_repo.has_pending_save(hashed_uid)
+                article_text = await user_state_repo.get_article_mode(hashed_uid)
+                has_article_mode = article_text is not None
 
                 # 練習 session 中的答案處理（需查 DB）
                 if parsed.command_type == CommandType.UNKNOWN and not has_pending_delete and not has_pending_save:
@@ -610,9 +615,13 @@ async def handle_message_event(event: MessageEvent) -> None:
         elif parsed.command_type == CommandType.CONFIRM_SAVE and has_pending_save:
             # 用戶輸入「1」確認入庫
             response = await _handle_confirm_save(hashed_uid, user_id, current_mode, target_lang)
+            if has_article_mode:
+                response += Messages.ARTICLE_WORD_SAVE_REMINDER
         elif has_pending_save and parsed.command_type == CommandType.SAVE:
             # 用戶輸入「入庫」→ 視同確認，直接儲存 pending 內容
             response = await _handle_confirm_save(hashed_uid, user_id, current_mode, target_lang)
+            if has_article_mode:
+                response += Messages.ARTICLE_WORD_SAVE_REMINDER
         elif has_pending_save and parsed.command_type not in PENDING_SAFE_COMMANDS:
             # Edge Case 24: 單一數字 0-9 但非「1」→ 提示，不清除 pending
             stripped_input = text.strip()
@@ -647,6 +656,34 @@ async def handle_message_event(event: MessageEvent) -> None:
         elif parsed.command_type == CommandType.CONFIRM_SAVE and not has_pending_save:
             # 輸入「1」但無 pending_save → 明確告知可能已過期
             response = Messages.PENDING_EXPIRED
+        # ── COMPLETE_ARTICLE 指令 ──
+        elif parsed.command_type == CommandType.COMPLETE_ARTICLE:
+            if has_article_mode:
+                async with get_session() as session:
+                    repo = UserStateRepository(session)
+                    await repo.clear_article_mode(hashed_uid)
+                    if has_pending_save:
+                        await repo.clear_pending_save(hashed_uid)
+                response = Messages.ARTICLE_MODE_EXIT
+            else:
+                # 不在 article mode，「完成」無意義 → 友善提示
+                response = "目前不在文章閱讀模式中。\n輸入日文長文可進入閱讀模式 📖"
+        # ── Article mode 中的單字查詢 ──
+        elif (
+            has_article_mode
+            and parsed.command_type == CommandType.UNKNOWN
+            and not has_session
+        ):
+            response = await _with_thinking_indicator(
+                user_id,
+                _handle_article_word_lookup(
+                    line_user_id=user_id,
+                    word_text=text,
+                    article_text=article_text,  # type: ignore[arg-type]
+                    mode=current_mode,
+                    target_lang=target_lang,
+                ),
+            )
         elif parsed.command_type == CommandType.EXIT_PRACTICE:
             response = await _handle_exit_practice(hashed_uid)
         elif parsed.command_type == CommandType.UNKNOWN and has_session:
@@ -698,6 +735,7 @@ async def handle_message_event(event: MessageEvent) -> None:
         need_save_last_msg = (
             parsed.command_type == CommandType.UNKNOWN
             and not has_session
+            and not has_article_mode
             and _has_meaningful_content(text)
         )
         if total_tokens > 0 or need_save_last_msg:
@@ -1497,9 +1535,11 @@ async def _handle_unknown(
     if '\t' in raw_text:
         return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
 
-    # Edge Case 26: 超長文本直接入庫 + 自動抽取（跳過分類節省時間）
+    # Edge Case 26: 超長文本 → 翻譯 + 進入文章閱讀模式
     if len(raw_text) > LONG_TEXT_THRESHOLD:
-        return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
+        return await _handle_article_translation(
+            line_user_id, raw_text, mode, target_lang,
+        )
 
     # 結構特徵分類（取代 LLM Router）
     category = _classify_input(raw_text, target_lang)
@@ -1508,7 +1548,9 @@ async def _handle_unknown(
         return await _handle_word_input(line_user_id, raw_text, mode, target_lang)
 
     if category == InputCategory.MATERIAL:
-        return await _save_and_extract(line_user_id, raw_text, mode, target_lang)
+        return await _handle_article_translation(
+            line_user_id, raw_text, mode, target_lang,
+        )
 
     if category == InputCategory.CHAT:
         from src.services.router_service import get_router_service
@@ -1679,6 +1721,144 @@ async def _save_and_extract(
         _schedule_background_extraction(hashed_uid, line_user_id, doc_id, mode, target_lang)
         return Messages.SAVE_PROCESSING
     return result.message
+
+
+async def _handle_article_translation(
+    line_user_id: str,
+    raw_text: str,
+    mode: str = "free",
+    target_lang: str = "ja",
+) -> str:
+    """翻譯長文並進入 article mode。"""
+    from src.lib.llm_client import get_llm_client
+    from src.prompts.article import (
+        ARTICLE_TRANSLATION_SYSTEM_PROMPT,
+        format_article_translation_request,
+    )
+    from src.repositories.api_usage_log_repo import ApiUsageLogRepository
+
+    hashed_uid = hash_user_id(line_user_id)
+    llm_client = get_llm_client()
+
+    # 截斷至 5000 字
+    text_to_translate = raw_text[:5000]
+
+    # LLM 翻譯（純文字回傳）
+    try:
+        response = await llm_client.complete_with_mode(
+            mode=mode,
+            system_prompt=ARTICLE_TRANSLATION_SYSTEM_PROMPT,
+            user_message=format_article_translation_request(text_to_translate),
+            temperature=0.3,
+            max_tokens=4096,
+            total_timeout=60,
+        )
+    except Exception as e:
+        logger.error("Article translation LLM call failed: %s", e)
+        return Messages.ERROR_GENERIC
+
+    translation = response.content
+    trace = response.to_trace()
+
+    # 記錄 token 用量
+    if trace:
+        try:
+            async with get_session() as session:
+                await ApiUsageLogRepository(session).create_log(
+                    hashed_uid, trace, "article_translation"
+                )
+        except Exception:
+            logger.warning("Failed to write article translation trace", exc_info=True)
+
+    # 進入 article mode
+    async with get_session() as session:
+        repo = UserStateRepository(session)
+        await repo.set_article_mode(hashed_uid, text_to_translate)
+
+    # 組裝回覆：翻譯 + 操作提示（注意 LINE 5000 字限制）
+    header = Messages.ARTICLE_TRANSLATION_HEADER
+    instructions = Messages.ARTICLE_MODE_INSTRUCTIONS
+    max_translation_len = (
+        LINE_MESSAGE_MAX_LENGTH - len(header) - len(instructions)
+        - FOOTER_RESERVE - 10
+    )
+    if len(translation) > max_translation_len:
+        translation = translation[:max_translation_len - 3] + "..."
+
+    return f"{header}\n{translation}{instructions}"
+
+
+async def _handle_article_word_lookup(
+    line_user_id: str,
+    word_text: str,
+    article_text: str,
+    mode: str = "free",
+    target_lang: str = "ja",
+) -> str:
+    """在 article mode 中查詢單字/文法（帶文章語境）。"""
+    from src.lib.llm_client import LLMTrace
+    from src.repositories.api_usage_log_repo import ApiUsageLogRepository
+    from src.services.router_service import get_router_service
+
+    hashed_uid = hash_user_id(line_user_id)
+    router_service = get_router_service()
+    llm_traces: list[tuple[LLMTrace, str]] = []
+
+    try:
+        # 先查 DB（與現有 _handle_word_input 相同）
+        items = await _search_user_items(hashed_uid, word_text)
+        if items:
+            result = _format_search_results(items, show_display=True)
+            return result + Messages.ARTICLE_WORD_SAVE_REMINDER
+
+        # DB 未命中 → LLM 查詞（帶文章語境）
+        display, extracted_item, trace = (
+            await router_service.get_word_explanation_with_context(
+                word=word_text,
+                article_context=article_text,
+                mode=mode,
+                target_lang=target_lang,
+            )
+        )
+        if trace:
+            llm_traces.append((trace, "article_word_lookup"))
+
+        # 設定 pending_save
+        async with get_session() as session:
+            repo = UserStateRepository(session)
+            if extracted_item:
+                await repo.set_pending_save_with_item(
+                    hashed_uid, word_text, extracted_item,
+                )
+            else:
+                await repo.set_pending_save(hashed_uid, word_text)
+
+        explanation = Messages.format(
+            "WORD_EXPLANATION", explanation=display,
+        )
+        return explanation + Messages.ARTICLE_WORD_SAVE_REMINDER
+
+    except Exception as e:
+        logger.error("Article word lookup failed: %s", e)
+        return Messages.ERROR_WORD_LOOKUP_BUSY
+
+    finally:
+        # 批次寫入 LLM traces
+        if llm_traces:
+            try:
+                async with get_session() as session:
+                    repo = ApiUsageLogRepository(session)
+                    for t, operation in llm_traces:
+                        await repo.create_log(
+                            user_id=hashed_uid,
+                            trace=t,
+                            operation=operation,
+                        )
+            except Exception:
+                logger.warning(
+                    "Failed to write article word lookup traces",
+                    exc_info=True,
+                )
 
 
 # ============================================================================

@@ -40,6 +40,7 @@ COMMAND_PATTERNS: list[tuple[str, CommandType, bool]] = [
     (r"^切換(免費|便宜|嚴謹)$", CommandType.MODE_SWITCH, True),
     (r"^(免費模式|便宜模式|嚴謹模式)$", CommandType.MODE_SWITCH, True),
     (r"^(英文|日文)$", CommandType.SET_LANG, True),
+    (r"^完成$", CommandType.COMPLETE_ARTICLE, False),
     (r"^(結束練習|停止練習)$", CommandType.EXIT_PRACTICE, False),
     (r"^(單字|文法)清單$", CommandType.LIST_ITEMS, True),  # 篩選清單
     (r"^清單$", CommandType.LIST_ITEMS, False),  # 全部清單

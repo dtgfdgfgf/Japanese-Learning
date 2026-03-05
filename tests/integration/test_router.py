@@ -59,6 +59,7 @@ def _setup_common_mocks(
     mock_user_state_repo.set_last_message = AsyncMock()
     mock_user_state_repo.set_pending_save = AsyncMock()
     mock_user_state_repo.set_pending_save_with_item = AsyncMock()
+    mock_user_state_repo.get_article_mode = AsyncMock(return_value=None)
 
     return mock_line, mock_user_state_repo, mock_profile_repo
 
@@ -78,10 +79,10 @@ class TestInputClassificationIntegration:
     @patch("src.api.webhook.get_session")
     @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
     @patch("src.api.webhook.has_active_session", new_callable=AsyncMock, return_value=False)
-    async def test_material_classification_auto_save(
+    async def test_material_classification_article_translation(
         self, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
     ):
-        """日文段落（有句讀）→ MATERIAL → 入庫 + 自動抽取。"""
+        """日文段落（有句讀）→ MATERIAL → 文章翻譯模式。"""
         mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
             mock_get_line, mock_session_ctx
         )
@@ -91,17 +92,17 @@ class TestInputClassificationIntegration:
             patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
             patch("src.api.webhook.build_mode_quick_replies", return_value=None),
             patch(
-                "src.api.webhook._save_and_extract",
+                "src.api.webhook._handle_article_translation",
                 new_callable=AsyncMock,
-                return_value="saved and extracted",
-            ) as mock_save,
+                return_value="📖 全文翻譯：\n翻譯結果",
+            ) as mock_article,
         ):
             event = _make_message_event("今日は天気がいいですね。散歩に行きましょう。")
             await handle_message_event(event)
 
-        mock_save.assert_awaited_once()
+        mock_article.assert_awaited_once()
         reply_text = _get_reply_text(mock_line)
-        assert "saved and extracted" in reply_text
+        assert "全文翻譯" in reply_text
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.get_line_client")

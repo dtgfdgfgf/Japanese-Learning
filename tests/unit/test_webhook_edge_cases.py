@@ -83,6 +83,7 @@ def _setup_common_mocks(
     mock_user_state_repo.get_pending_save = AsyncMock(
         return_value="apple" if has_pending_save else None
     )
+    mock_user_state_repo.get_article_mode = AsyncMock(return_value=None)
 
     return mock_line, mock_user_state_repo, mock_profile_repo
 
@@ -616,7 +617,7 @@ class TestCase26LongTextDirectSave:
     async def test_long_text_saved_directly(
         self, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
     ):
-        """2001+ 字文本跳過 Router，直接入庫 + 自動抽取。"""
+        """2001+ 字文本跳過 Router，進入文章翻譯模式。"""
         mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
             mock_get_line, mock_session_ctx
         )
@@ -625,25 +626,25 @@ class TestCase26LongTextDirectSave:
             patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
             patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
             patch("src.api.webhook.build_mode_quick_replies", return_value=None),
-            patch("src.api.webhook._save_and_extract", new_callable=AsyncMock, return_value="已入庫：ああ...\n\n✨ 抽出 3 個單字") as mock_save_extract,
+            patch("src.api.webhook._handle_article_translation", new_callable=AsyncMock, return_value="📖 全文翻譯：\n翻譯結果") as mock_article,
         ):
             long_text = "あ" * 2001
             event = _make_message_event(long_text)
             await handle_message_event(event)
 
         reply_text = _get_reply_text(mock_line)
-        assert "已入庫" in reply_text
-        mock_save_extract.assert_awaited_once()
+        assert "全文翻譯" in reply_text
+        mock_article.assert_awaited_once()
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.get_line_client")
     @patch("src.api.webhook.get_session")
     @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
     @patch("src.api.webhook.has_active_session", new_callable=AsyncMock, return_value=False)
-    async def test_long_text_save_failure_returns_error(
+    async def test_long_text_translation_failure_returns_error(
         self, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
     ):
-        """長文本自動入庫失敗時，回傳錯誤訊息。"""
+        """長文本翻譯失敗時，回傳錯誤訊息。"""
         mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
             mock_get_line, mock_session_ctx
         )
@@ -652,7 +653,7 @@ class TestCase26LongTextDirectSave:
             patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
             patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
             patch("src.api.webhook.build_mode_quick_replies", return_value=None),
-            patch("src.api.webhook._save_and_extract", new_callable=AsyncMock, return_value=Messages.ERROR_SAVE),
+            patch("src.api.webhook._handle_article_translation", new_callable=AsyncMock, return_value=Messages.ERROR_SAVE),
         ):
             long_text = "あ" * 2001
             event = _make_message_event(long_text)
@@ -669,7 +670,7 @@ class TestCase26LongTextDirectSave:
     async def test_short_text_classified_as_material(
         self, mock_has_session, mock_hash, mock_session_ctx, mock_get_line
     ):
-        """2000 字以下的假名長文 → MATERIAL 分類 → 入庫。"""
+        """2000 字以下的假名長文 → MATERIAL 分類 → 文章翻譯模式。"""
         mock_line, mock_user_state_repo, mock_profile_repo = _setup_common_mocks(
             mock_get_line, mock_session_ctx
         )
@@ -678,15 +679,15 @@ class TestCase26LongTextDirectSave:
             patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
             patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
             patch("src.api.webhook.build_mode_quick_replies", return_value=None),
-            patch("src.api.webhook._save_and_extract", new_callable=AsyncMock, return_value="已入庫") as mock_save_extract,
+            patch("src.api.webhook._handle_article_translation", new_callable=AsyncMock, return_value="📖 全文翻譯：\n翻譯結果") as mock_article,
         ):
-            # "あ"×100 → 有假名 + len>20 → MATERIAL → _save_and_extract
+            # "あ"×100 → 有假名 + len>20 → MATERIAL → _handle_article_translation
             normal_text = "あ" * 100
             event = _make_message_event(normal_text)
             await handle_message_event(event)
 
-        # 應走 MATERIAL → _save_and_extract
-        mock_save_extract.assert_awaited_once()
+        # 應走 MATERIAL → _handle_article_translation
+        mock_article.assert_awaited_once()
 
 
 # ============================================================================
