@@ -156,7 +156,7 @@ class ApiUsageLogRepository(BaseRepository[ApiUsageLog]):
                 model=row.model,
                 total_input_tokens=row.total_input_tokens or 0,
                 total_output_tokens=row.total_output_tokens or 0,
-                total_cost_usd=row.total_cost_usd or 0.0,
+                total_cost_usd=float(row.total_cost_usd or 0),
                 call_count=row.call_count or 0,
             )
             for row in rows
@@ -188,4 +188,4 @@ class ApiUsageLogRepository(BaseRepository[ApiUsageLog]):
         result = await self.session.execute(stmt)
         total = result.scalar()
 
-        return total or 0.0
+        return float(total or 0)
