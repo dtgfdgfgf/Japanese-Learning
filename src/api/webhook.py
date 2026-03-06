@@ -99,6 +99,9 @@ LONG_TEXT_THRESHOLD = 2000
 _COMPOUND_WORD_MAX_CHARS = 15
 _COMPOUND_WORD_MAX_TOKENS = 2
 
+# 多單字偵測：每個 token 的最大字元數（日文單字一般 1-8 字元）
+_MULTI_WORD_TOKEN_MAX_CHARS = 10
+
 
 # ============================================================================
 # 輸入分類（取代 LLM Router）
@@ -172,7 +175,16 @@ def _classify_input(text: str, target_lang: str = "ja") -> InputCategory:
     # --- 1. 含假名 → 日文內容 ---
     if has_kana:
         has_ja_punct = any(p in stripped for p in _SENTENCE_PUNCTUATION_JA)
-        if has_ja_punct or has_newline or len(stripped) > _MATERIAL_LENGTH_THRESHOLD:
+        if has_ja_punct:
+            return InputCategory.MATERIAL
+        # 空格/換行分隔的多個短 token → 多單字輸入，不是文章
+        tokens = stripped.split()
+        if (
+            len(tokens) <= 5
+            and all(len(t) <= _MULTI_WORD_TOKEN_MAX_CHARS for t in tokens)
+        ):
+            return InputCategory.WORD
+        if has_newline or len(stripped) > _MATERIAL_LENGTH_THRESHOLD:
             return InputCategory.MATERIAL
         return InputCategory.WORD
 
@@ -1784,8 +1796,14 @@ async def _handle_word_input(
         )
 
         # 兩個短 token 且總字元數在閾值內 → 視為 compound word（ice cream, to be），不切分
+        # 僅適用於英文；日文每個假名詞都是獨立單字，不應合併
+        _has_any_kana = any(
+            "\u3040" <= c <= "\u309f" or "\u30a0" <= c <= "\u30ff" or "\uff65" <= c <= "\uff9f"
+            for t in tokens for c in t
+        )
         if (
             is_multi_word
+            and not _has_any_kana
             and len(tokens) <= _COMPOUND_WORD_MAX_TOKENS
             and len(stripped.replace(" ", "")) <= _COMPOUND_WORD_MAX_CHARS
         ):

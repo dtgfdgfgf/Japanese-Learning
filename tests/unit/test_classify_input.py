@@ -40,9 +40,27 @@ class TestKanaDetection:
     def test_kana_with_comma(self) -> None:
         assert _classify_input("赤い、青い") == InputCategory.MATERIAL
 
-    def test_kana_with_newline(self) -> None:
-        """含換行 → MATERIAL"""
-        assert _classify_input("食べる\n飲む") == InputCategory.MATERIAL
+    def test_kana_short_words_with_newline(self) -> None:
+        """短日文單字換行分隔 → WORD（多單字輸入）"""
+        assert _classify_input("食べる\n飲む") == InputCategory.WORD
+
+    def test_kana_short_words_with_space(self) -> None:
+        """短日文單字空格分隔 → WORD（多單字輸入）"""
+        assert _classify_input("はんしゃする はしのした") == InputCategory.WORD
+
+    def test_kana_many_short_words_with_newline(self) -> None:
+        """多個短日文單字換行分隔（≤5） → WORD"""
+        assert _classify_input("食べる\n飲む\n走る") == InputCategory.WORD
+
+    def test_kana_too_many_words_with_newline(self) -> None:
+        """超過 5 個日文 token + 換行 → MATERIAL"""
+        text = "\n".join(["食べる", "飲む", "走る", "泳ぐ", "読む", "書く"])
+        assert _classify_input(text) == InputCategory.MATERIAL
+
+    def test_kana_long_text_with_newline(self) -> None:
+        """長日文含換行（每個 token 超過閾值） → MATERIAL"""
+        text = "あ" * 15 + "\n" + "い" * 15
+        assert _classify_input(text) == InputCategory.MATERIAL
 
     def test_kana_long_text_no_punct(self) -> None:
         """超過 20 字元、無標點但有假名 → MATERIAL"""
