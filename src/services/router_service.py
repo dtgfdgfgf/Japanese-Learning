@@ -18,9 +18,11 @@ from src.lib.llm_client import LLMResponse, LLMTrace, get_llm_client
 from src.prompts.router import format_router_request, get_system_prompt
 from src.prompts.word_explanation import (
     EN_ARTICLE_JSON_SYSTEM_PROMPT,
+    EN_BATCH_JSON_SYSTEM_PROMPT,
     EN_JSON_SYSTEM_PROMPT,
     EN_PLAIN_SYSTEM_PROMPT,
     get_ja_article_json_system_prompt,
+    get_ja_batch_json_system_prompt,
     get_ja_json_system_prompt,
     get_ja_plain_system_prompt,
 )
@@ -412,6 +414,86 @@ class RouterService:
             # Fallback：呼叫原版 get_word_explanation（僅 JSON 解析等客戶端錯誤時）
             resp = await self.get_word_explanation(word, mode=mode, target_lang=target_lang)
             return resp.content, None, resp.to_trace()
+
+    async def get_batch_word_explanation_structured(
+        self,
+        words: list[str],
+        mode: str = "free",
+        target_lang: str = "ja",
+    ) -> tuple[list[tuple[str, str, dict[str, Any] | None]], LLMTrace | None]:
+        """批次取得多個單字的解釋與結構化 item 資料（單次 LLM 呼叫）。
+
+        Args:
+            words: 要解釋的單字列表
+            mode: LLM mode (free/cheap/rigorous)
+            target_lang: 目標語言 (ja/en)
+
+        Returns:
+            (results, llm_trace)
+            - results: list of (word, display, extracted_item_dict | None)
+            - llm_trace: LLM 呼叫追蹤資訊
+        """
+        system_prompt = (
+            get_ja_batch_json_system_prompt() if target_lang == "ja"
+            else EN_BATCH_JSON_SYSTEM_PROMPT
+        )
+        user_message = "\n".join(words)
+
+        try:
+            response_data, trace = await self.llm_client.complete_json_with_mode(
+                mode=mode,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                temperature=0.3,
+                max_tokens=4096,
+                total_timeout=90,
+            )
+
+            # response_data 應為 list；若 LLM 回傳 dict 包裹 array，嘗試展開
+            if isinstance(response_data, dict):
+                # 嘗試常見的 key：results, words, data
+                for key in ("results", "words", "data"):
+                    if isinstance(response_data.get(key), list):
+                        response_data = response_data[key]
+                        break
+                else:
+                    logger.warning("Batch response is dict without array key: %s", list(response_data.keys()))
+                    response_data = []
+
+            if not isinstance(response_data, list):
+                logger.warning("Batch response is not a list, got %s", type(response_data))
+                response_data = []
+
+            # 建立 word → entry 對照表
+            entry_map: dict[str, dict[str, Any]] = {}
+            for entry in response_data:
+                if isinstance(entry, dict) and "word" in entry:
+                    entry_map[entry["word"].strip().lower()] = entry
+
+            results: list[tuple[str, str, dict[str, Any] | None]] = []
+            for word in words:
+                entry = entry_map.get(word.strip().lower())
+                if entry and entry.get("display"):
+                    display = entry["display"]
+                    item_data = entry.get("item")
+                    extracted_item: dict[str, Any] | None = None
+                    if item_data and isinstance(item_data, dict):
+                        extracted_item = _build_extracted_item(
+                            item_data, word, display, target_lang
+                        )
+                    results.append((word, display, extracted_item))
+                else:
+                    # LLM 未回傳此字的結果
+                    results.append((word, "", None))
+
+            return results, trace
+
+        except (TimeoutError, GeminiServerError):
+            raise
+        except Exception as e:
+            logger.warning("Batch word explanation failed: %s", e)
+            # 全部標記為失敗，讓呼叫端走 fallback
+            return [(w, "", None) for w in words], None
 
     async def get_word_explanation_with_context(
         self,

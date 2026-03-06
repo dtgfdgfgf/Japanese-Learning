@@ -11,6 +11,7 @@ import asyncio
 import enum
 import json
 import logging
+import re
 import time
 import unicodedata
 from collections.abc import Callable, Coroutine
@@ -1082,6 +1083,38 @@ async def _handle_save(line_user_id: str, mode: str = "free", target_lang: str =
     return result.message
 
 
+# 批次入庫合法字元：字母、hyphen、日文（平假名/片假名/漢字）
+_BATCH_WORD_PATTERN = re.compile(
+    r"^[a-zA-Z\-\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff\uff65-\uff9f]+$"
+)
+
+
+def _split_batch_save_keywords(keyword: str) -> list[str] | None:
+    """嘗試將 keyword 切分為多個單字。
+
+    回傳 None 表示不應切分（單字或 compound word）。
+    切分條件：2-10 個 token、每個 ≤30 字元、全部是合法字元。
+    """
+    # 用空白分割
+    tokens = keyword.split()
+
+    # compound word 例外：≤2 token 且整體 ≤15 字元 → 不切分
+    if len(tokens) <= 1:
+        return None
+    if len(tokens) == 2 and len(keyword) <= 15:
+        return None
+
+    # 範圍檢查
+    if not (2 <= len(tokens) <= 10):
+        return None
+
+    for token in tokens:
+        if len(token) > 30 or not _BATCH_WORD_PATTERN.match(token):
+            return None
+
+    return tokens
+
+
 async def _handle_word_save(
     line_user_id: str,
     word: str | None,
@@ -1091,6 +1124,13 @@ async def _handle_word_save(
     """處理「單字 入庫」直接入庫指令。"""
     if not word or not _has_meaningful_content(word):
         return Messages.SAVE_NO_CONTENT
+
+    # 偵測多字批次入庫
+    batch_words = _split_batch_save_keywords(word)
+    if batch_words:
+        return await _handle_batch_word_save(
+            line_user_id, batch_words, mode, target_lang
+        )
 
     hashed_uid = hash_user_id(line_user_id)
 
@@ -1110,6 +1150,134 @@ async def _handle_word_save(
         _schedule_background_extraction(hashed_uid, line_user_id, doc_id, mode, target_lang)
         return Messages.SAVE_PROCESSING
     return result.message
+
+
+async def _handle_batch_word_save(
+    line_user_id: str,
+    words: list[str],
+    mode: str = "free",
+    target_lang: str = "ja",
+) -> str:
+    """批次入庫多個單字（單次 LLM 呼叫）。"""
+    from src.repositories.api_usage_log_repo import ApiUsageLogRepository
+    from src.repositories.document_repo import DocumentRepository
+    from src.repositories.item_repo import ItemRepository
+    from src.schemas.extractor import ExtractedItem
+    from src.services.router_service import get_router_service
+
+    hashed_uid = hash_user_id(line_user_id)
+    router_service = get_router_service()
+
+    # 單次 LLM 呼叫取得所有單字的解釋
+    try:
+        results, trace = await router_service.get_batch_word_explanation_structured(
+            words, mode=mode, target_lang=target_lang
+        )
+    except Exception as e:
+        logger.error("Batch word explanation failed: %s", e)
+        results = [(w, "", None) for w in words]
+        trace = None
+
+    # 記錄 token 用量
+    if trace:
+        try:
+            async with get_session() as session:
+                await ApiUsageLogRepository(session).create_log(
+                    hashed_uid, trace, "batch_word_explanation"
+                )
+        except Exception:
+            logger.warning("Failed to write batch word explanation trace", exc_info=True)
+
+    saved_words: list[str] = []
+    pending_words: list[str] = []
+    failed_words: list[str] = []
+
+    # 逐字入庫 raw + document，收集 doc_id
+    word_doc_map: list[tuple[str, str, dict[str, Any] | None, str | None]] = []
+    for word, display, extracted_item in results:
+        try:
+            async with get_session() as session:
+                service = CommandService(session)
+                result = await service.save_raw(
+                    line_user_id=line_user_id,
+                    content_text=word,
+                )
+            if not result.success:
+                logger.warning("Batch save_raw failed for '%s': %s", word, result.message)
+                failed_words.append(word)
+                continue
+            doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
+            word_doc_map.append((word, display, extracted_item, doc_id))
+        except Exception as e:
+            logger.error("Batch save_raw error for '%s': %s", word, e)
+            failed_words.append(word)
+
+    # 批次 upsert items（共用一個 session）
+    if word_doc_map:
+        try:
+            async with get_session() as session:
+                item_repo = ItemRepository(session)
+                doc_repo = DocumentRepository(session)
+                for word, display, extracted_item, doc_id in word_doc_map:
+                    if extracted_item and doc_id:
+                        try:
+                            item = ExtractedItem(**extracted_item)
+                            await item_repo.upsert(
+                                user_id=hashed_uid,
+                                doc_id=doc_id,
+                                item_type=item.item_type,
+                                key=item.key,
+                                payload=item.to_payload(),
+                                source_quote=item.source_quote,
+                                confidence=item.confidence,
+                            )
+                            await doc_repo.update(
+                                doc_id, parse_status="parsed", parser_version="v1.0.0"
+                            )
+                            saved_words.append(word)
+                        except Exception as e:
+                            logger.warning("Direct item creation failed for '%s': %s", word, e)
+                            _schedule_background_extraction(
+                                hashed_uid, line_user_id, doc_id, mode, target_lang
+                            )
+                            pending_words.append(word)
+                    elif doc_id:
+                        # LLM 未回傳結構化資料 → 背景抽取
+                        _schedule_background_extraction(
+                            hashed_uid, line_user_id, doc_id, mode, target_lang
+                        )
+                        pending_words.append(word)
+        except Exception as e:
+            logger.error("Batch item upsert session error: %s", e)
+            # session 級錯誤 → 尚未處理的字全部走背景抽取
+            for word, _display, _item, doc_id in word_doc_map:
+                if word not in saved_words and word not in pending_words and doc_id:
+                    _schedule_background_extraction(
+                        hashed_uid, line_user_id, doc_id, mode, target_lang
+                    )
+                    pending_words.append(word)
+
+    # 組裝回覆訊息
+    if saved_words and not pending_words:
+        return Messages.format(
+            "BATCH_SAVE_SUCCESS",
+            count=len(saved_words),
+            words="、".join(saved_words),
+        )
+    elif saved_words and pending_words:
+        return Messages.format(
+            "BATCH_SAVE_PARTIAL",
+            saved="、".join(saved_words),
+            pending="、".join(pending_words),
+        )
+    elif pending_words:
+        return Messages.format(
+            "BATCH_SAVE_PARTIAL",
+            saved="（無）",
+            pending="、".join(pending_words),
+        )
+    else:
+        return Messages.ERROR_SAVE
 
 
 async def _handle_confirm_save(

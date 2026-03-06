@@ -88,6 +88,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "INPUT_URL_DETECTED": "目前不支援直接輸入 URL 🔗\n請複製文章的文字內容後貼上",
     "INPUT_LIKELY_ROMAJI": "看起來是日語的羅馬字拼音 ✏️\n請開啟日文輸入法後重新輸入，或直接貼上日文文字",
     "PENDING_WRONG_NUMBER": "只有輸入「1」可以確認入庫喔 ☝️\n輸入「1」入庫，或輸入其他單字繼續查詢",
+    "BATCH_SAVE_SUCCESS": "✅ 已批次入庫 {count} 個單字：{words}\n💡 輸入「練習」開始複習",
+    "BATCH_SAVE_PARTIAL": "✅ 已入庫：{saved}\n⚠️ 處理中：{pending}（分析完成後通知）",
     "INPUT_LONG_TEXT_SAVED": "📄 文章較長（{length} 字），已直接入庫",
     "INPUT_NON_TEXT": "目前僅支援文字訊息 📝\n請將想查詢的內容以文字方式輸入",
     "INPUT_UNSUPPORTED_LANG": "目前支援日文和英文內容 🌐\n請輸入日文或英文的學習素材",

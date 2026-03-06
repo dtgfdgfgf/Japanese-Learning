@@ -362,7 +362,7 @@ class LLMClient:
         timeout: float | None = None,
         max_tokens: int | None = None,
         total_timeout: float | None = None,
-    ) -> tuple[dict[str, Any], LLMTrace]:
+    ) -> tuple[dict[str, Any] | list[Any], LLMTrace]:
         """根據模式完成 JSON 回應，與 complete_json 相同解析邏輯。"""
         response = await self.complete_with_mode(
             mode=mode,
