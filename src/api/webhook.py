@@ -793,6 +793,16 @@ async def handle_message_event(event: MessageEvent) -> None:
                 user_id, full_response, quick_reply
             )
 
+    except TimeoutError as e:
+        # 處理超時：通知使用者稍後重試
+        logger.warning("Processing timeout in message handler: %s", e)
+        timeout_msg = "處理時間過長，請稍後再試一次 🙏"
+        try:
+            replied = await line_client.reply_message(reply_token, timeout_msg)
+            if not replied:
+                await line_client.push_message(user_id, timeout_msg)
+        except Exception:
+            logger.exception("Failed to send timeout error reply")
     except Exception as e:
         # 最後防線：確保使用者至少收到回覆
         logger.exception("Unhandled error in message handler: %s", e)
@@ -826,14 +836,20 @@ async def handle_postback_event(event: PostbackEvent) -> None:
         if action == "switch_mode" and mode in ("free", "cheap", "rigorous"):
             daily_used = 0
             daily_cap = 50000
+            mode_set_ok = False
             try:
                 async with get_session() as session:
                     repo = UserProfileRepository(session)
                     profile = await repo.set_mode(hashed_uid, mode)
                     daily_used = profile.daily_used_tokens or 0
                     daily_cap = profile.daily_cap_tokens_free or 50000
+                    mode_set_ok = True
             except Exception as e:
-                logger.warning("Failed to set mode via postback: %s", e)
+                logger.warning("Failed to set mode via postback: %s", e, exc_info=True)
+
+            if not mode_set_ok:
+                await line_client.reply_message(reply_token, Messages.ERROR_GENERIC)
+                return
 
             confirm_msg = format_mode_switch_confirm(mode)
 
@@ -1021,33 +1037,48 @@ async def _with_thinking_indicator(
     coro: Coroutine[Any, Any, _T],
     initial_delay: float = 20.0,
     interval: float = 20.0,
+    max_timeout: float = 120.0,
 ) -> _T:
     """包裝耗時操作，等待超過 initial_delay 後顯示載入動畫並每 interval 秒推送思考提示。
 
     - 大多數請求（free mode）<5s 完成，不會觸發任何通知
     - 超過 initial_delay 後：顯示 LINE 載入動畫 + 推送「思考中⋯」
     - 每 interval 秒重複推送 + 刷新動畫
+    - 超過 max_timeout 秒後取消任務並拋出 TimeoutError
     """
     task = asyncio.ensure_future(coro)
     line_client = get_line_client()
 
-    # Phase 1: 等待初始延遲，大多數請求會在此完成
-    done, _ = await asyncio.wait({task}, timeout=initial_delay)
-    if done:
-        return task.result()
-
-    # Phase 2: 超時 → 開始定期通知
-    # 先顯示載入動畫（即時視覺反饋）
-    await line_client.show_loading_animation(raw_user_id, loading_seconds=60)
-
-    while True:
-        done, _ = await asyncio.wait({task}, timeout=interval)
+    try:
+        # Phase 1: 等待初始延遲，大多數請求會在此完成
+        done, _ = await asyncio.wait({task}, timeout=initial_delay)
         if done:
             return task.result()
 
-        # 推送文字提示 + 刷新載入動畫
-        await line_client.push_message(raw_user_id, "思考中，請稍候⋯")
+        # Phase 2: 超時 → 開始定期通知
+        # 先顯示載入動畫（即時視覺反饋）
         await line_client.show_loading_animation(raw_user_id, loading_seconds=60)
+
+        elapsed = initial_delay
+        while elapsed < max_timeout:
+            remaining = min(interval, max_timeout - elapsed)
+            done, _ = await asyncio.wait({task}, timeout=remaining)
+            if done:
+                return task.result()
+            elapsed += remaining
+            if elapsed >= max_timeout:
+                break
+            # 推送文字提示 + 刷新載入動畫
+            await line_client.push_message(raw_user_id, "思考中，請稍候⋯")
+            await line_client.show_loading_animation(raw_user_id, loading_seconds=60)
+
+        # 超過最大超時：取消任務
+        task.cancel()
+        raise TimeoutError(f"Processing exceeded max_timeout={max_timeout}s")
+    except BaseException:
+        if not task.done():
+            task.cancel()
+        raise
 
 
 def _schedule_background_extraction(
@@ -1812,6 +1843,15 @@ async def _handle_word_input(
         if is_multi_word:
             # 處理第一個單字，提示其餘逐一輸入
             first_word = tokens[0]
+            remaining = "、".join(f"「{t}」" for t in tokens[1:])
+
+            # 先查 DB：已入庫的詞可秒回，不需呼叫 LLM
+            db_items = await _search_user_items(hashed_user_id, first_word)
+            if db_items:
+                base = _format_search_results(db_items, show_display=True)
+                return f"{base}\n\n{format_word_multi_detected(first_word, remaining)}"
+
+            # DB 無紀錄：LLM 解釋
             try:
                 display, extracted_item, word_trace = (
                     await router_service.get_word_explanation_structured(
@@ -1831,7 +1871,6 @@ async def _handle_word_input(
                     )
                 else:
                     await user_state_repo.set_pending_save(hashed_user_id, first_word)
-            remaining = "、".join(f"「{t}」" for t in tokens[1:])
             base = Messages.format("WORD_EXPLANATION", explanation=display)
             return f"{base}\n\n{format_word_multi_detected(first_word, remaining)}"
 
