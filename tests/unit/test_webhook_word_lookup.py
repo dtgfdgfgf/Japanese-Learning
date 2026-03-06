@@ -7,6 +7,7 @@ DB 優先查詢 + LLM fallback 行為。
 注意：已改用結構特徵分類（_classify_input），不再呼叫 router_service.classify()。
 """
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -47,6 +48,22 @@ _SAMPLE_EXTRACTED_ITEM = {
     "confidence": 1.0,
     "display": _SAMPLE_DISPLAY,
 }
+
+
+def _make_extracted_item(word: str) -> dict[str, Any]:
+    """建立模擬的 extracted_item dict。"""
+    return {
+        "item_type": "vocab",
+        "key": f"vocab:{word}",
+        "surface": word,
+        "pronunciation": "",
+        "pos": "noun",
+        "glossary_zh": [f"{word}的中文"],
+        "example": f"Example for {word}.",
+        "example_translation": f"{word}的例句翻譯。",
+        "confidence": 1.0,
+        "display": f"【{word}】的完整解釋",
+    }
 
 
 class TestWordClassificationDbHit:
@@ -248,19 +265,19 @@ class TestJapaneseWordDbHit:
 
 
 # ============================================================================
-# WORD 分類：multi-word 路徑
+# WORD 分類：multi-word 路徑 — 統一處理
 # ============================================================================
 
 
 class TestMultiWordInput:
-    """多單字輸入（"red apple"）→ 解釋第一個 + 提示其餘。"""
+    """多單字輸入 → 所有單字都走完整流程。"""
 
     @pytest.mark.asyncio
     @patch("src.api.webhook.get_session")
     @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
     @patch("src.services.router_service.get_router_service")
     @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
-    async def test_multi_word_explains_first(
+    async def test_compound_word_treated_as_single(
         self,
         mock_search: AsyncMock,
         mock_get_router: MagicMock,
@@ -295,6 +312,336 @@ class TestMultiWordInput:
             "red apple", mode="free", target_lang="en"
         )
         assert "red apple" in result
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_multi_word_all_db_hit(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+        mock_session_ctx: MagicMock,
+    ) -> None:
+        """3 字全在 DB → 合併顯示，無 pending_save。"""
+        mock_router = MagicMock()
+        mock_get_router.return_value = mock_router
+
+        # 每個 token 都回傳 DB 結果
+        mock_search.side_effect = [
+            [_mock_item("apple")],
+            [_mock_item("banana")],
+            [_mock_item("cherry")],
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_ctx.return_value = mock_session
+
+        mock_user_state_repo = MagicMock()
+        mock_user_state_repo.set_pending_save = AsyncMock()
+        mock_user_state_repo.set_pending_save_with_item = AsyncMock()
+        mock_user_state_repo.set_pending_save_multi = AsyncMock()
+
+        with patch(
+            "src.api.webhook.UserStateRepository",
+            return_value=mock_user_state_repo,
+        ):
+            result = await _handle_unknown(
+                "Utest", "apple banana cherry", mode="free", target_lang="en"
+            )
+
+        # 不呼叫 LLM
+        mock_router.get_word_explanation_structured.assert_not_called()
+        mock_router.get_batch_word_explanation_structured.assert_not_called()
+        # 不設 pending
+        mock_user_state_repo.set_pending_save.assert_not_awaited()
+        mock_user_state_repo.set_pending_save_with_item.assert_not_awaited()
+        mock_user_state_repo.set_pending_save_multi.assert_not_awaited()
+        # 回覆包含已入庫標記
+        assert "已入庫" in result
+        # 回覆有分隔線
+        assert "━━━━━━━━━━" in result
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_multi_word_all_db_miss(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+        mock_session_ctx: MagicMock,
+    ) -> None:
+        """3 字全不在 DB → batch LLM，全部進 pending_save_multi。"""
+        mock_router = MagicMock()
+
+        batch_results = [
+            ("apple", "apple 的解釋", _make_extracted_item("apple")),
+            ("banana", "banana 的解釋", _make_extracted_item("banana")),
+            ("cherry", "cherry 的解釋", _make_extracted_item("cherry")),
+        ]
+        mock_router.get_batch_word_explanation_structured = AsyncMock(
+            return_value=(batch_results, None)
+        )
+        mock_get_router.return_value = mock_router
+
+        mock_search.return_value = []  # 全部 DB miss
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_ctx.return_value = mock_session
+
+        mock_user_state_repo = MagicMock()
+        mock_user_state_repo.set_pending_save = AsyncMock()
+        mock_user_state_repo.set_pending_save_with_item = AsyncMock()
+        mock_user_state_repo.set_pending_save_multi = AsyncMock()
+
+        with patch(
+            "src.api.webhook.UserStateRepository",
+            return_value=mock_user_state_repo,
+        ):
+            result = await _handle_unknown(
+                "Utest", "apple banana cherry", mode="free", target_lang="en"
+            )
+
+        # 應呼叫 batch LLM
+        mock_router.get_batch_word_explanation_structured.assert_awaited_once()
+        # 應設定 multi pending
+        mock_user_state_repo.set_pending_save_multi.assert_awaited_once()
+        call_args = mock_user_state_repo.set_pending_save_multi.call_args
+        assert call_args[0][0] == "hashed_user"
+        entries = call_args[0][1]
+        assert len(entries) == 3
+        assert entries[0]["word"] == "apple"
+        # 回覆包含各字解釋
+        assert "apple 的解釋" in result
+        assert "banana 的解釋" in result
+        assert "cherry 的解釋" in result
+        # 有 pending 提示
+        assert "入庫" in result
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_multi_word_mixed(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+        mock_session_ctx: MagicMock,
+    ) -> None:
+        """A 在 DB、B/C 不在 → A 秒回 + B/C LLM，只 B/C 進 pending。"""
+        mock_router = MagicMock()
+
+        batch_results = [
+            ("banana", "banana 的解釋", _make_extracted_item("banana")),
+            ("cherry", "cherry 的解釋", _make_extracted_item("cherry")),
+        ]
+        mock_router.get_batch_word_explanation_structured = AsyncMock(
+            return_value=(batch_results, None)
+        )
+        mock_get_router.return_value = mock_router
+
+        # apple 在 DB，banana 和 cherry 不在
+        mock_search.side_effect = [
+            [_mock_item("apple")],  # apple → DB hit
+            [],                      # banana → DB miss
+            [],                      # cherry → DB miss
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_ctx.return_value = mock_session
+
+        mock_user_state_repo = MagicMock()
+        mock_user_state_repo.set_pending_save = AsyncMock()
+        mock_user_state_repo.set_pending_save_with_item = AsyncMock()
+        mock_user_state_repo.set_pending_save_multi = AsyncMock()
+
+        with patch(
+            "src.api.webhook.UserStateRepository",
+            return_value=mock_user_state_repo,
+        ):
+            result = await _handle_unknown(
+                "Utest", "apple banana cherry", mode="free", target_lang="en"
+            )
+
+        # batch LLM 只查 banana 和 cherry
+        mock_router.get_batch_word_explanation_structured.assert_awaited_once()
+        call_args = mock_router.get_batch_word_explanation_structured.call_args
+        assert call_args[0][0] == ["banana", "cherry"]
+
+        # pending 只有 banana 和 cherry
+        mock_user_state_repo.set_pending_save_multi.assert_awaited_once()
+        entries = mock_user_state_repo.set_pending_save_multi.call_args[0][1]
+        assert len(entries) == 2
+        assert entries[0]["word"] == "banana"
+        assert entries[1]["word"] == "cherry"
+
+        # 回覆包含已入庫和新解釋
+        assert "已入庫" in result
+        assert "banana 的解釋" in result
+
+
+# ============================================================================
+# 多字 pending 確認入庫 + 取消
+# ============================================================================
+
+
+class TestMultiWordConfirmSave:
+    """「1」確認多字 pending → 全部入庫。"""
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook._schedule_background_extraction")
+    @patch("src.api.webhook.get_session")
+    async def test_multi_word_confirm_save(
+        self,
+        mock_session_ctx: MagicMock,
+        mock_bg_extract: MagicMock,
+    ) -> None:
+        """確認 3 字 pending → 全部入庫，回覆 BATCH_SAVE_SUCCESS。"""
+        import json
+
+        from src.repositories.user_state_repo import (
+            UserStateRepository as RealUserStateRepo,
+        )
+
+        multi_pending = json.dumps({
+            "words": [
+                {"word": "apple", "extracted_item": _make_extracted_item("apple")},
+                {"word": "banana", "extracted_item": _make_extracted_item("banana")},
+                {"word": "cherry", "extracted_item": _make_extracted_item("cherry")},
+            ]
+        }, ensure_ascii=False)
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_ctx.return_value = mock_session
+
+        mock_user_state_repo = MagicMock()
+        mock_user_state_repo.get_pending_save = AsyncMock(return_value=multi_pending)
+        mock_user_state_repo.clear_pending_save = AsyncMock()
+
+        mock_command_service = MagicMock()
+        mock_command_service.save_raw = AsyncMock(
+            return_value=MagicMock(
+                success=True,
+                data={"doc_id": "test-doc-id"},
+                message="OK",
+            )
+        )
+
+        mock_item_repo = MagicMock()
+        mock_item_repo.upsert = AsyncMock()
+        mock_doc_repo = MagicMock()
+        mock_doc_repo.update = AsyncMock()
+
+        with (
+            patch("src.api.webhook.UserStateRepository") as mock_usr_cls,
+            patch("src.api.webhook.CommandService", return_value=mock_command_service),
+            patch("src.repositories.item_repo.ItemRepository", return_value=mock_item_repo),
+            patch("src.repositories.document_repo.DocumentRepository", return_value=mock_doc_repo),
+        ):
+            # 保留 parse_pending_save_content 靜態方法
+            mock_usr_cls.return_value = mock_user_state_repo
+            mock_usr_cls.parse_pending_save_content = RealUserStateRepo.parse_pending_save_content
+
+            from src.api.webhook import _handle_confirm_save
+
+            result = await _handle_confirm_save(
+                "hashed_user", "Utest", mode="free", target_lang="en"
+            )
+
+        # 應包含批次入庫成功訊息
+        assert "已批次入庫" in result or "已入庫" in result
+        # save_raw 應呼叫 3 次
+        assert mock_command_service.save_raw.await_count == 3
+
+
+class TestMultiWordPendingCancel:
+    """多字 pending 被新輸入取消 → 列出全部。"""
+
+    def test_multi_word_pending_cancel_notice(self) -> None:
+        """多字 pending 取消時應列出所有被取消的單字。"""
+        import json
+
+        from src.repositories.user_state_repo import UserStateRepository
+        from src.templates.messages import Messages
+
+        multi_pending = json.dumps({
+            "words": [
+                {"word": "apple", "extracted_item": None},
+                {"word": "banana", "extracted_item": None},
+            ]
+        }, ensure_ascii=False)
+
+        entries = UserStateRepository.parse_pending_save_content(multi_pending)
+        assert len(entries) == 2
+        all_words = "、".join(f"「{w}」" for w, _ in entries)
+        notice = Messages.format("PENDING_DISCARDED_MULTI", words=all_words)
+        assert "apple" in notice
+        assert "banana" in notice
+
+
+# ============================================================================
+# parse_pending_save_content 格式相容性
+# ============================================================================
+
+
+class TestParsePendingSaveContent:
+    """parse_pending_save_content 新舊格式相容測試。"""
+
+    def test_parse_multi_format(self) -> None:
+        """新多字 JSON 格式解析。"""
+        import json
+
+        from src.repositories.user_state_repo import UserStateRepository
+
+        raw = json.dumps({
+            "words": [
+                {"word": "食べる", "extracted_item": {"key": "vocab:食べる"}},
+                {"word": "飲む", "extracted_item": None},
+            ]
+        }, ensure_ascii=False)
+
+        result = UserStateRepository.parse_pending_save_content(raw)
+        assert len(result) == 2
+        assert result[0] == ("食べる", {"key": "vocab:食べる"})
+        assert result[1] == ("飲む", None)
+
+    def test_parse_single_json_format(self) -> None:
+        """舊單字 JSON 格式仍正常。"""
+        import json
+
+        from src.repositories.user_state_repo import UserStateRepository
+
+        raw = json.dumps({
+            "word": "食べる",
+            "extracted_item": {"key": "vocab:食べる"},
+        }, ensure_ascii=False)
+
+        result = UserStateRepository.parse_pending_save_content(raw)
+        assert len(result) == 1
+        assert result[0] == ("食べる", {"key": "vocab:食べる"})
+
+    def test_parse_plain_text_format(self) -> None:
+        """純文字 legacy 格式仍正常。"""
+        from src.repositories.user_state_repo import UserStateRepository
+
+        result = UserStateRepository.parse_pending_save_content("食べる")
+        assert len(result) == 1
+        assert result[0] == ("食べる", None)
 
 
 # ============================================================================

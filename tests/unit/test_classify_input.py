@@ -52,10 +52,10 @@ class TestKanaDetection:
         """多個短日文單字換行分隔（≤5） → WORD"""
         assert _classify_input("食べる\n飲む\n走る") == InputCategory.WORD
 
-    def test_kana_too_many_words_with_newline(self) -> None:
-        """超過 5 個日文 token + 換行 → MATERIAL"""
+    def test_kana_many_words_with_newline_no_limit(self) -> None:
+        """6+ 個短日文 token + 換行 → WORD（移除上限後）"""
         text = "\n".join(["食べる", "飲む", "走る", "泳ぐ", "読む", "書く"])
-        assert _classify_input(text) == InputCategory.MATERIAL
+        assert _classify_input(text) == InputCategory.WORD
 
     def test_kana_long_text_with_newline(self) -> None:
         """長日文含換行（每個 token 超過閾值） → MATERIAL"""
@@ -146,7 +146,8 @@ class TestEnglishDominant:
         assert _classify_input("Hello world!") == InputCategory.MATERIAL
 
     def test_english_with_newline(self) -> None:
-        assert _classify_input("hello\nworld") == InputCategory.MATERIAL
+        """英文短單字換行分隔 → WORD（移除上限後）"""
+        assert _classify_input("hello\nworld") == InputCategory.WORD
 
     def test_multi_word_short_tokens(self) -> None:
         """2-5 個短 alpha token → WORD（multi-word）"""
@@ -156,8 +157,13 @@ class TestEnglishDominant:
         assert _classify_input("one two three four five") == InputCategory.WORD
 
     def test_multi_word_six_tokens(self) -> None:
-        """超過 5 個 token → MATERIAL"""
-        assert _classify_input("one two three four five six") == InputCategory.MATERIAL
+        """6+ 個短 alpha token → WORD（移除上限後）"""
+        assert _classify_input("one two three four five six") == InputCategory.WORD
+
+    def test_multi_word_ten_plus_tokens(self) -> None:
+        """10+ 個短 alpha token → WORD"""
+        text = "one two three four five six seven eight nine ten eleven"
+        assert _classify_input(text) == InputCategory.WORD
 
     def test_english_question_mark(self) -> None:
         """英文問句有 '?' 標點 → MATERIAL（英文句讀優先）"""

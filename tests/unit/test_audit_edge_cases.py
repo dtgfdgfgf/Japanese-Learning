@@ -241,40 +241,52 @@ class TestConfirmSaveEdgeCases:
 
     async def test_successful_confirm_returns_save_message(self) -> None:
         """正常確認 → 回傳包含「已入庫」的訊息。"""
+        from src.repositories.user_state_repo import UserStateRepository as RealRepo
+
         mock_repo = _mock_user_state_repo(pending_save="apple")
         mock_service = _mock_command_service("已入庫：apple")
         with (
             patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
-            patch("src.api.webhook.UserStateRepository", return_value=mock_repo),
+            patch("src.api.webhook.UserStateRepository") as mock_cls,
             patch("src.api.webhook.CommandService", return_value=mock_service),
-            patch("src.api.webhook._auto_extract", new_callable=AsyncMock, return_value="1 個單字"),
+            patch("src.api.webhook._schedule_background_extraction"),
         ):
+            mock_cls.return_value = mock_repo
+            mock_cls.parse_pending_save_content = RealRepo.parse_pending_save_content
             result = await _handle_confirm_save("hashed_uid", "Utest")
         assert "已入庫" in result
 
     async def test_confirm_clears_pending_save(self) -> None:
         """成功入庫後 clear_pending_save 應被呼叫。"""
+        from src.repositories.user_state_repo import UserStateRepository as RealRepo
+
         mock_repo = _mock_user_state_repo(pending_save="apple")
         mock_service = _mock_command_service("已入庫：apple")
         with (
             patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
-            patch("src.api.webhook.UserStateRepository", return_value=mock_repo),
+            patch("src.api.webhook.UserStateRepository") as mock_cls,
             patch("src.api.webhook.CommandService", return_value=mock_service),
-            patch("src.api.webhook._auto_extract", new_callable=AsyncMock, return_value=None),
+            patch("src.api.webhook._schedule_background_extraction"),
         ):
+            mock_cls.return_value = mock_repo
+            mock_cls.parse_pending_save_content = RealRepo.parse_pending_save_content
             await _handle_confirm_save("hashed_uid", "Utest")
         mock_repo.clear_pending_save.assert_awaited_once_with("hashed_uid")
 
     async def test_confirm_passes_line_user_id_to_save_raw(self) -> None:
         """save_raw 接收的是原始 line_user_id（非 hashed）。"""
+        from src.repositories.user_state_repo import UserStateRepository as RealRepo
+
         mock_repo = _mock_user_state_repo(pending_save="word")
         mock_service = _mock_command_service("ok")
         with (
             patch("src.api.webhook.get_session", return_value=_mock_session_ctx()),
-            patch("src.api.webhook.UserStateRepository", return_value=mock_repo),
+            patch("src.api.webhook.UserStateRepository") as mock_cls,
             patch("src.api.webhook.CommandService", return_value=mock_service),
-            patch("src.api.webhook._auto_extract", new_callable=AsyncMock, return_value=None),
+            patch("src.api.webhook._schedule_background_extraction"),
         ):
+            mock_cls.return_value = mock_repo
+            mock_cls.parse_pending_save_content = RealRepo.parse_pending_save_content
             await _handle_confirm_save("hashed_uid", "Uoriginal")
         call_kwargs = mock_service.save_raw.call_args[1]
         assert call_kwargs["line_user_id"] == "Uoriginal"

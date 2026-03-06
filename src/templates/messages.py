@@ -80,7 +80,8 @@ _MESSAGES_ZH_TW: dict[str, str] = {
     "WORD_SAVE_AND_EXTRACT": "✅ {word}已入庫\n💡 輸入「練習」開始複習",
     "SAVE_NO_CONTENT": "請先貼上要入庫的內容，再輸入「入庫」",
     "WORD_EXPLANATION": "{explanation}\n\n尚未入庫，請在 5 分鐘內輸入「1」即可入庫\n直接輸入其他單字將取消本次入庫並開始新查詢\n若非你要查的字，請重新輸入正確的拼寫",
-    "WORD_MULTI_DETECTED": "💡 偵測到多個單字，目前處理「{first_word}」。{remaining} 請逐一輸入。",
+    "WORD_MULTI_PENDING": "{count} 個單字尚未入庫，輸入「1」可一次全部入庫\n直接輸入其他內容將取消本次入庫",
+    "PENDING_DISCARDED_MULTI": "⚠️ {words} 的入庫已取消。",
     "PENDING_EXPIRED": "沒有待入庫的內容（可能已超過 5 分鐘）。\n輸入「單字 save」可直接入庫。",
     "PENDING_DISCARDED": "⚠️「{word}」的入庫已取消。輸入「{word} save」可直接入庫。",
     "INPUT_NO_MEANINGFUL_CONTENT": "請輸入文字內容（日文或英文），純符號或 emoji 無法處理 🙏\n輸入「說明」查看使用方式",
@@ -651,15 +652,6 @@ def format_mode_switch_confirm(mode: str) -> str:
     """格式化模式切換確認訊息。"""
     mode_label = MODE_LABELS.get(mode, mode)
     return Messages.format("MODE_SWITCH_CONFIRM", mode_label=mode_label)
-
-
-def format_word_multi_detected(first_word: str, remaining: str) -> str:
-    """格式化多單字輸入提醒訊息。"""
-    return Messages.format(
-        "WORD_MULTI_DETECTED",
-        first_word=first_word,
-        remaining=remaining,
-    )
 
 
 def format_stats_summary(

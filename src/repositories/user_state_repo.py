@@ -217,25 +217,54 @@ class UserStateRepository:
         row.pending_save_at = datetime.now(UTC)
         await self.session.flush()
 
-    def parse_pending_save_content(self, raw_content: str) -> tuple[str, dict | None]:
+    @staticmethod
+    def parse_pending_save_content(raw_content: str) -> list[tuple[str, dict | None]]:
         """解析 pending_save_content，相容新舊格式。
 
-        新格式：JSON {"word": "...", "extracted_item": {...}}
+        多字格式：JSON {"words": [{"word": "...", "extracted_item": {...}}, ...]}
+        單字格式：JSON {"word": "...", "extracted_item": {...}}
         舊格式：純文字（直接回傳）
 
         Args:
             raw_content: DB 中的 pending_save_content
 
         Returns:
-            (content, extracted_item_dict | None)
+            list of (content, extracted_item_dict | None)
         """
         try:
             data = json.loads(raw_content)
-            if isinstance(data, dict) and "word" in data:
-                return data["word"], data.get("extracted_item")
+            if isinstance(data, dict):
+                if "words" in data and isinstance(data["words"], list):
+                    return [
+                        (entry.get("word", ""), entry.get("extracted_item"))
+                        for entry in data["words"]
+                        if isinstance(entry, dict) and "word" in entry
+                    ]
+                if "word" in data:
+                    return [(data["word"], data.get("extracted_item"))]
         except (json.JSONDecodeError, TypeError):
             pass
-        return raw_content, None
+        return [(raw_content, None)]
+
+    async def set_pending_save_multi(
+        self,
+        user_id: str,
+        entries: list[dict],
+    ) -> None:
+        """設定多單字待確認入庫的內容。
+
+        Args:
+            user_id: Hashed LINE user ID
+            entries: [{"word": str, "extracted_item": dict|None}, ...]
+        """
+        payload = json.dumps(
+            {"words": entries},
+            ensure_ascii=False,
+        )
+        row = await self._get_or_create(user_id)
+        row.pending_save_content = payload
+        row.pending_save_at = datetime.now(UTC)
+        await self.session.flush()
 
     async def clear_pending_save(self, user_id: str) -> None:
         """清除待確認入庫狀態。

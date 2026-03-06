@@ -295,11 +295,15 @@ class TestCase2PendingDiscardNotification:
         # get_pending_save 回傳 "apple"（被丟棄的舊 pending）
         mock_user_state_repo.get_pending_save = AsyncMock(return_value="apple")
 
+        from src.repositories.user_state_repo import UserStateRepository as RealRepo
+
         with (
             patch("src.api.webhook.UserProfileRepository", return_value=mock_profile_repo),
-            patch("src.api.webhook.UserStateRepository", return_value=mock_user_state_repo),
+            patch("src.api.webhook.UserStateRepository") as mock_usr_cls,
             patch("src.api.webhook.build_mode_quick_replies", return_value=None),
         ):
+            mock_usr_cls.return_value = mock_user_state_repo
+            mock_usr_cls.parse_pending_save_content = RealRepo.parse_pending_save_content
             event = _make_message_event("banana")
             await handle_message_event(event)
 

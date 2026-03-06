@@ -51,7 +51,6 @@ from src.templates.messages import (
     format_search_result_header,
     format_search_result_more,
     format_usage_footer,
-    format_word_multi_detected,
 )
 
 if TYPE_CHECKING:
@@ -179,10 +178,7 @@ def _classify_input(text: str, target_lang: str = "ja") -> InputCategory:
             return InputCategory.MATERIAL
         # 空格/換行分隔的多個短 token → 多單字輸入，不是文章
         tokens = stripped.split()
-        if (
-            len(tokens) <= 5
-            and all(len(t) <= _MULTI_WORD_TOKEN_MAX_CHARS for t in tokens)
-        ):
+        if all(len(t) <= _MULTI_WORD_TOKEN_MAX_CHARS for t in tokens):
             return InputCategory.WORD
         if has_newline or len(stripped) > _MATERIAL_LENGTH_THRESHOLD:
             return InputCategory.MATERIAL
@@ -200,20 +196,22 @@ def _classify_input(text: str, target_lang: str = "ja") -> InputCategory:
     english_ratio = ascii_alpha_count / total_non_space
     if english_ratio > 0.5:
         has_en_punct = any(p in stripped for p in _SENTENCE_PUNCTUATION_EN)
-        if has_en_punct or has_newline:
+        if has_en_punct:
             return InputCategory.MATERIAL
 
         tokens = stripped.split()
         if len(tokens) == 1:
             return InputCategory.WORD
 
-        # 2-5 個短 alpha token → 多單字輸入，視為 WORD
-        if 2 <= len(tokens) <= 5 and all(
+        # 多個短 alpha token → 多單字輸入，視為 WORD（移到 newline 檢查之前）
+        if len(tokens) >= 2 and all(
             len(t) <= 30 and all(ch.isalpha() or ch == "-" for ch in t)
             for t in tokens
         ):
             return InputCategory.WORD
 
+        if has_newline:
+            return InputCategory.MATERIAL
         return InputCategory.MATERIAL
 
     # --- 4. 有中文問句標記 → CHAT ---
@@ -657,14 +655,14 @@ async def handle_message_event(event: MessageEvent) -> None:
                         target_lang=target_lang,
                     ),
                 )
-                # 在回覆前加上取消通知（解析 JSON 格式取出實際單字）
+                # 在回覆前加上取消通知
                 if discarded_word:
-                    try:
-                        data = json.loads(discarded_word)
-                        display_word = data["word"] if isinstance(data, dict) and "word" in data else discarded_word
-                    except (json.JSONDecodeError, TypeError):
-                        display_word = discarded_word
-                    notice = Messages.format("PENDING_DISCARDED", word=display_word)
+                    entries = UserStateRepository.parse_pending_save_content(discarded_word)
+                    if len(entries) == 1:
+                        notice = Messages.format("PENDING_DISCARDED", word=entries[0][0])
+                    else:
+                        all_words = "、".join(f"「{w}」" for w, _ in entries)
+                        notice = Messages.format("PENDING_DISCARDED_MULTI", words=all_words)
                     response = f"{notice}\n\n{response}"
         elif parsed.command_type == CommandType.CONFIRM_SAVE and not has_pending_save:
             # 輸入「1」但無 pending_save → 明確告知可能已過期
@@ -1329,7 +1327,7 @@ async def _handle_confirm_save(
     mode: str = "free",
     target_lang: str = "ja",
 ) -> str:
-    """處理確認入庫（用戶輸入「1」）。"""
+    """處理確認入庫（用戶輸入「1」）。支援單字與多字 pending。"""
     async with get_session() as session:
         user_state_repo = UserStateRepository(session)
         raw_content = await user_state_repo.get_pending_save(hashed_uid)
@@ -1337,58 +1335,132 @@ async def _handle_confirm_save(
         if not raw_content:
             return Messages.PENDING_EXPIRED
 
-        # 解析新舊格式
-        pending_word, extracted_item = user_state_repo.parse_pending_save_content(raw_content)
-
-        service = CommandService(session)
-        result = await service.save_raw(
-            line_user_id=line_user_id,
-            content_text=pending_word,
-        )
-
+        entries = UserStateRepository.parse_pending_save_content(raw_content)
         await user_state_repo.clear_pending_save(hashed_uid)
 
-    if not result.success:
+    # ── 單字入庫（維持現有邏輯）──
+    if len(entries) == 1:
+        pending_word, extracted_item = entries[0]
+
+        async with get_session() as session:
+            service = CommandService(session)
+            result = await service.save_raw(
+                line_user_id=line_user_id,
+                content_text=pending_word,
+            )
+
+        if not result.success:
+            return result.message
+
+        doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
+
+        if extracted_item and doc_id:
+            try:
+                async with get_session() as session:
+                    from src.repositories.item_repo import ItemRepository
+                    from src.schemas.extractor import ExtractedItem
+
+                    item_repo = ItemRepository(session)
+                    item = ExtractedItem(**extracted_item)
+                    await item_repo.upsert(
+                        user_id=hashed_uid,
+                        doc_id=doc_id,
+                        item_type=item.item_type,
+                        key=item.key,
+                        payload=item.to_payload(),
+                        source_quote=item.source_quote,
+                        confidence=item.confidence,
+                    )
+                    from src.repositories.document_repo import DocumentRepository
+
+                    doc_repo = DocumentRepository(session)
+                    await doc_repo.update(
+                        doc_id, parse_status="parsed", parser_version="v1.0.0"
+                    )
+
+                return Messages.format("WORD_SAVE_AND_EXTRACT", word=pending_word)
+            except Exception as e:
+                logger.warning("Direct item creation failed, falling back to auto-extract: %s", e)
+
+        if doc_id:
+            _schedule_background_extraction(hashed_uid, line_user_id, doc_id, mode, target_lang)
+            return Messages.SAVE_PROCESSING
+
         return result.message
 
-    doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
+    # ── 多字入庫 ──
+    from src.repositories.document_repo import DocumentRepository
+    from src.repositories.item_repo import ItemRepository
+    from src.schemas.extractor import ExtractedItem
 
-    # 有預先抽取的 item → 直接建立 item（跳過 ExtractorService）
-    if extracted_item and doc_id:
+    saved_words: list[str] = []
+    pending_words: list[str] = []
+
+    for pending_word, extracted_item in entries:
         try:
             async with get_session() as session:
-                from src.repositories.item_repo import ItemRepository
-                from src.schemas.extractor import ExtractedItem
-
-                item_repo = ItemRepository(session)
-                item = ExtractedItem(**extracted_item)
-                await item_repo.upsert(
-                    user_id=hashed_uid,
-                    doc_id=doc_id,
-                    item_type=item.item_type,
-                    key=item.key,
-                    payload=item.to_payload(),
-                    source_quote=item.source_quote,
-                    confidence=item.confidence,
+                service = CommandService(session)
+                result = await service.save_raw(
+                    line_user_id=line_user_id,
+                    content_text=pending_word,
                 )
-                # 更新 document 狀態為 parsed
-                from src.repositories.document_repo import DocumentRepository
-
-                doc_repo = DocumentRepository(session)
-                await doc_repo.update(
-                    doc_id, parse_status="parsed", parser_version="v1.0.0"
+            if not result.success:
+                logger.warning("Multi save_raw failed for '%s': %s", pending_word, result.message)
+                continue
+            doc_id = str(result.data["doc_id"]) if result.data.get("doc_id") else None
+            if extracted_item and doc_id:
+                try:
+                    async with get_session() as session:
+                        item_repo = ItemRepository(session)
+                        doc_repo = DocumentRepository(session)
+                        item = ExtractedItem(**extracted_item)
+                        await item_repo.upsert(
+                            user_id=hashed_uid,
+                            doc_id=doc_id,
+                            item_type=item.item_type,
+                            key=item.key,
+                            payload=item.to_payload(),
+                            source_quote=item.source_quote,
+                            confidence=item.confidence,
+                        )
+                        await doc_repo.update(
+                            doc_id, parse_status="parsed", parser_version="v1.0.0"
+                        )
+                        saved_words.append(pending_word)
+                except Exception as e:
+                    logger.warning("Item creation failed for '%s': %s", pending_word, e)
+                    _schedule_background_extraction(
+                        hashed_uid, line_user_id, doc_id, mode, target_lang
+                    )
+                    pending_words.append(pending_word)
+            elif doc_id:
+                _schedule_background_extraction(
+                    hashed_uid, line_user_id, doc_id, mode, target_lang
                 )
-
-            return Messages.format("WORD_SAVE_AND_EXTRACT", word=pending_word)
+                pending_words.append(pending_word)
         except Exception as e:
-            logger.warning("Direct item creation failed, falling back to auto-extract: %s", e)
+            logger.error("Multi save error for '%s': %s", pending_word, e)
 
-    # 無 item 或直接建立失敗 → 背景抽取（不阻塞回覆）
-    if doc_id:
-        _schedule_background_extraction(hashed_uid, line_user_id, doc_id, mode, target_lang)
-        return Messages.SAVE_PROCESSING
-
-    return result.message
+    if saved_words and not pending_words:
+        return Messages.format(
+            "BATCH_SAVE_SUCCESS",
+            count=len(saved_words),
+            words="、".join(saved_words),
+        )
+    elif saved_words and pending_words:
+        return Messages.format(
+            "BATCH_SAVE_PARTIAL",
+            saved="、".join(saved_words),
+            pending="、".join(pending_words),
+        )
+    elif pending_words:
+        return Messages.format(
+            "BATCH_SAVE_PARTIAL",
+            saved="（無）",
+            pending="、".join(pending_words),
+        )
+    else:
+        return Messages.ERROR_SAVE
 
 
 async def _handle_search(line_user_id: str, keyword: str | None) -> str:
@@ -1802,7 +1874,7 @@ async def _handle_word_input(
 ) -> str:
     """處理 WORD 分類的輸入：DB 搜尋 → LLM 解釋 → pending save。
 
-    包含 multi-word 偵測（"apple banana cherry" → 解釋第一個 + 提示其餘）。
+    支援多單字統一處理：所有偵測到的單字都走完整流程。
     """
     from src.lib.llm_client import LLMTrace
     from src.services.router_service import get_router_service
@@ -1815,10 +1887,9 @@ async def _handle_word_input(
         stripped = raw_text.strip()
         tokens = stripped.split()
 
-        # 多單字偵測：2-5 個短 alpha token
+        # 多單字偵測：2+ 個短 token
         is_multi_word = (
             len(tokens) >= 2
-            and len(tokens) <= 5
             and all(len(t) <= 30 for t in tokens)
             and all(
                 t.isalpha() or all(ch.isalpha() or ch == "-" for ch in t)
@@ -1826,8 +1897,7 @@ async def _handle_word_input(
             )
         )
 
-        # 兩個短 token 且總字元數在閾值內 → 視為 compound word（ice cream, to be），不切分
-        # 僅適用於英文；日文每個假名詞都是獨立單字，不應合併
+        # compound word 偵測（ice cream, to be）— 僅英文，日文不合併
         _has_any_kana = any(
             "\u3040" <= c <= "\u309f" or "\u30a0" <= c <= "\u30ff" or "\uff65" <= c <= "\uff9f"
             for t in tokens for c in t
@@ -1840,67 +1910,137 @@ async def _handle_word_input(
         ):
             is_multi_word = False
 
-        if is_multi_word:
-            # 處理第一個單字，提示其餘逐一輸入
-            first_word = tokens[0]
-            remaining = "、".join(f"「{t}」" for t in tokens[1:])
-
-            # 先查 DB：已入庫的詞可秒回，不需呼叫 LLM
-            db_items = await _search_user_items(hashed_user_id, first_word)
+        if not is_multi_word:
+            # ── 單字流程（含 compound word）──
+            word = stripped
+            db_items = await _search_user_items(hashed_user_id, word)
             if db_items:
-                base = _format_search_results(db_items, show_display=True)
-                return f"{base}\n\n{format_word_multi_detected(first_word, remaining)}"
+                return _format_search_results(db_items, show_display=True)
 
-            # DB 無紀錄：LLM 解釋
             try:
                 display, extracted_item, word_trace = (
                     await router_service.get_word_explanation_structured(
-                        first_word, mode=mode, target_lang=target_lang
+                        word, mode=mode, target_lang=target_lang
                     )
                 )
                 if word_trace:
                     llm_traces.append((word_trace, "word_explanation"))
-            except Exception as e:
-                logger.exception("Word explanation failed (multi-word first=%s)", first_word)
+            except Exception:
+                logger.exception("Word explanation failed (single word=%s)", word)
                 return Messages.ERROR_WORD_LOOKUP_BUSY
+
             async with get_session() as session:
                 user_state_repo = UserStateRepository(session)
                 if extracted_item:
                     await user_state_repo.set_pending_save_with_item(
-                        hashed_user_id, first_word, extracted_item
+                        hashed_user_id, word, extracted_item
                     )
                 else:
-                    await user_state_repo.set_pending_save(hashed_user_id, first_word)
-            base = Messages.format("WORD_EXPLANATION", explanation=display)
-            return f"{base}\n\n{format_word_multi_detected(first_word, remaining)}"
+                    await user_state_repo.set_pending_save(hashed_user_id, word)
+            return Messages.format("WORD_EXPLANATION", explanation=display)
 
-        # 單字流程：先查 DB，已入庫則直接顯示
-        word = stripped
-        db_items = await _search_user_items(hashed_user_id, word)
-        if db_items:
-            return _format_search_results(db_items, show_display=True)
+        # ── 多單字統一處理 ──
 
-        # DB 無紀錄：LLM 解釋 + 詢問入庫
-        try:
-            display, extracted_item, word_trace = (
-                await router_service.get_word_explanation_structured(
-                    word, mode=mode, target_lang=target_lang
-                )
-            )
-            if word_trace:
-                llm_traces.append((word_trace, "word_explanation"))
-        except Exception as e:
-            logger.exception("Word explanation failed (single word=%s)", word)
-            return Messages.ERROR_WORD_LOOKUP_BUSY
-        async with get_session() as session:
-            user_state_repo = UserStateRepository(session)
-            if extracted_item:
-                await user_state_repo.set_pending_save_with_item(
-                    hashed_user_id, word, extracted_item
-                )
+        # 1. 逐 token 查 DB
+        db_hit_map: dict[str, list[Item]] = {}
+        db_miss_words: list[str] = []
+        for token in tokens:
+            db_items = await _search_user_items(hashed_user_id, token)
+            if db_items:
+                db_hit_map[token] = db_items
             else:
-                await user_state_repo.set_pending_save(hashed_user_id, word)
-        return Messages.format("WORD_EXPLANATION", explanation=display)
+                db_miss_words.append(token)
+
+        # 2. DB misses 呼叫 LLM
+        llm_result_map: dict[str, tuple[str, dict[str, Any] | None]] = {}
+        llm_failed = False
+
+        if len(db_miss_words) == 1:
+            word = db_miss_words[0]
+            try:
+                display, extracted_item, word_trace = (
+                    await router_service.get_word_explanation_structured(
+                        word, mode=mode, target_lang=target_lang
+                    )
+                )
+                if word_trace:
+                    llm_traces.append((word_trace, "word_explanation"))
+                llm_result_map[word] = (display, extracted_item)
+            except Exception:
+                logger.exception("Word explanation failed (multi, word=%s)", word)
+                llm_failed = True
+        elif len(db_miss_words) >= 2:
+            try:
+                results, trace = await router_service.get_batch_word_explanation_structured(
+                    db_miss_words, mode=mode, target_lang=target_lang
+                )
+                if trace:
+                    llm_traces.append((trace, "batch_word_explanation"))
+                for word, display, extracted_item in results:
+                    llm_result_map[word] = (display, extracted_item)
+            except Exception:
+                logger.exception("Batch word explanation failed")
+                llm_failed = True
+
+        # LLM 全部失敗且無 DB hit → 直接回報錯誤
+        if llm_failed and not db_hit_map:
+            return Messages.ERROR_WORD_LOOKUP_BUSY
+
+        # 3. 組合回覆（按輸入順序）
+        _LINE_MSG_BUDGET = 4500
+        parts: list[str] = []
+        char_count = 0
+
+        for token in tokens:
+            if token in db_hit_map:
+                section = f"[已入庫] {_format_search_results(db_hit_map[token], show_display=True)}"
+            elif token in llm_result_map:
+                display, _ = llm_result_map[token]
+                section = display if display else f"「{token}」"
+            elif llm_failed:
+                section = f"「{token}」查詢失敗"
+            else:
+                section = f"「{token}」"
+
+            # 訊息過長時後續單字改為簡要摘要
+            if char_count + len(section) > _LINE_MSG_BUDGET and parts:
+                item_data = llm_result_map.get(token, (None, None))[1] if token in llm_result_map else None
+                if item_data and isinstance(item_data, dict):
+                    glossary = item_data.get("glossary_zh", [])
+                    section = f"【{token}】{glossary[0] if glossary else ''}"
+
+            parts.append(section)
+            char_count += len(section) + 12  # +12 估算分隔線長度
+
+        separator = "\n━━━━━━━━━━\n"
+        reply = separator.join(parts)
+
+        # 4. 存入 pending_save（僅 LLM 成功解釋的字）
+        pending_entries = [
+            {"word": w, "extracted_item": llm_result_map[w][1]}
+            for w in db_miss_words
+            if w in llm_result_map
+        ]
+
+        if pending_entries:
+            async with get_session() as session:
+                user_state_repo = UserStateRepository(session)
+                if len(pending_entries) == 1:
+                    entry = pending_entries[0]
+                    if entry["extracted_item"]:
+                        await user_state_repo.set_pending_save_with_item(
+                            hashed_user_id, entry["word"], entry["extracted_item"]
+                        )
+                    else:
+                        await user_state_repo.set_pending_save(hashed_user_id, entry["word"])
+                else:
+                    await user_state_repo.set_pending_save_multi(
+                        hashed_user_id, pending_entries
+                    )
+            pending_hint = Messages.format("WORD_MULTI_PENDING", count=len(pending_entries))
+            reply = f"{reply}\n\n{pending_hint}"
+
+        return reply
 
     except Exception as e:
         logger.error("Word input handling failed: %s", e)
