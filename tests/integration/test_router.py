@@ -159,7 +159,7 @@ class TestInputClassificationIntegration:
             patch(
                 "src.services.router_service.RouterService.get_word_explanation_structured",
                 new_callable=AsyncMock,
-                return_value=("means thinking", None, None),
+                return_value=("means thinking", [], None),
             ),
         ):
             event = _make_message_event("考える")
@@ -189,7 +189,7 @@ class TestInputClassificationIntegration:
             patch(
                 "src.services.router_service.RouterService.get_word_explanation_structured",
                 new_callable=AsyncMock,
-                return_value=("ok means alright", None, None),
+                return_value=("ok means alright", [], None),
             ),
         ):
             event = _make_message_event("ok")

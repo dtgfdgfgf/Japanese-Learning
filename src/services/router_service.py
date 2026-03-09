@@ -357,8 +357,8 @@ class RouterService:
         word: str,
         mode: str = "free",
         target_lang: str = "ja",
-    ) -> tuple[str, dict[str, Any] | None, LLMTrace | None]:
-        """取得單字解釋並同時回傳結構化 item 資料。
+    ) -> tuple[str, list[dict[str, Any]], LLMTrace | None]:
+        """取得單字解釋並同時回傳結構化 items 資料。
 
         一次 LLM 呼叫同時回傳使用者友善的解釋和結構化 ExtractedItem 欄位，
         省去後續再呼叫 ExtractorService 的步驟。
@@ -369,9 +369,9 @@ class RouterService:
             target_lang: 目標語言 (ja/en)
 
         Returns:
-            (display_text, extracted_item_dict | None, llm_trace | None)
+            (display_text, extracted_items, llm_trace | None)
             - display_text: 使用者友善的 markdown 解釋
-            - extracted_item_dict: 結構化 item 資料（JSON parse 失敗時為 None）
+            - extracted_items: 結構化 item 資料列表（0 個代表 LLM 無法確定詞條）
             - llm_trace: LLM 呼叫追蹤資訊（用於記錄到 api_usage_logs）
         """
         system_prompt = (
@@ -390,30 +390,35 @@ class RouterService:
             )
 
             display = response_data.get("display", "")
-            item_data = response_data.get("item")
+
+            # 新格式 "items": [...] 優先；fallback 舊格式 "item": {...}
+            items_raw = response_data.get("items")
+            if items_raw is None:
+                old_item = response_data.get("item")
+                items_raw = [old_item] if old_item and isinstance(old_item, dict) else []
+            if not isinstance(items_raw, list):
+                items_raw = []
 
             if not display:
-                # JSON 成功但 display 為空，不應發生但做防禦
                 logger.warning("Structured word explanation returned empty display")
-                return word, item_data, trace
+                return word, [], trace
 
-            # 組裝 extracted_item_dict
-            extracted_item: dict[str, Any] | None = None
-            if item_data and isinstance(item_data, dict):
-                extracted_item = _build_extracted_item(
-                    item_data, word, display, target_lang
-                )
+            # 組裝 extracted_items list
+            extracted_items: list[dict[str, Any]] = []
+            for item_data in items_raw:
+                if item_data and isinstance(item_data, dict):
+                    extracted_items.append(
+                        _build_extracted_item(item_data, word, display, target_lang)
+                    )
 
-            return display, extracted_item, trace
+            return display, extracted_items, trace
 
         except (TimeoutError, GeminiServerError):
-            # Server 不可用或 timeout — 同一 provider 再呼叫也會失敗，直接傳播
             raise
         except Exception as e:
             logger.warning("Structured word explanation failed, falling back: %s", e)
-            # Fallback：呼叫原版 get_word_explanation（僅 JSON 解析等客戶端錯誤時）
             resp = await self.get_word_explanation(word, mode=mode, target_lang=target_lang)
-            return resp.content, None, resp.to_trace()
+            return resp.content, [], resp.to_trace()
 
     async def get_batch_word_explanation_structured(
         self,
@@ -501,7 +506,7 @@ class RouterService:
         article_context: str,
         mode: str = "free",
         target_lang: str = "ja",
-    ) -> tuple[str, dict[str, Any] | None, LLMTrace | None]:
+    ) -> tuple[str, list[dict[str, Any]], LLMTrace | None]:
         """帶文章語境的單字查詞（文章閱讀模式使用）。
 
         複用共用的核心規則 prompt，在 system prompt 中注入文章語境。
@@ -513,7 +518,7 @@ class RouterService:
             target_lang: 目標語言 (ja/en)
 
         Returns:
-            (display_text, extracted_item_dict | None, llm_trace | None)
+            (display_text, extracted_items, llm_trace | None)
         """
         from src.prompts.article import build_article_word_lookup_system_prompt
 
@@ -536,29 +541,36 @@ class RouterService:
             )
 
             display = response_data.get("display", "")
-            item_data = response_data.get("item")
+
+            # 新格式 "items": [...] 優先；fallback 舊格式 "item": {...}
+            items_raw = response_data.get("items")
+            if items_raw is None:
+                old_item = response_data.get("item")
+                items_raw = [old_item] if old_item and isinstance(old_item, dict) else []
+            if not isinstance(items_raw, list):
+                items_raw = []
 
             if not display:
                 logger.warning("Article word lookup returned empty display")
-                return word, item_data, trace
+                return word, [], trace
 
-            # 組裝 extracted_item_dict
-            extracted_item: dict[str, Any] | None = None
-            if item_data and isinstance(item_data, dict):
-                extracted_item = _build_extracted_item(
-                    item_data, word, display, target_lang
-                )
+            # 組裝 extracted_items list
+            extracted_items: list[dict[str, Any]] = []
+            for item_data in items_raw:
+                if item_data and isinstance(item_data, dict):
+                    extracted_items.append(
+                        _build_extracted_item(item_data, word, display, target_lang)
+                    )
 
-            return display, extracted_item, trace
+            return display, extracted_items, trace
 
         except (TimeoutError, GeminiServerError):
             raise
         except Exception as e:
             logger.warning("Article word lookup failed, falling back to context-free: %s", e)
-            # Fallback 呼叫無語境的查詞（降級體驗），在結尾標註
             resp = await self.get_word_explanation(word, mode=mode, target_lang=target_lang)
             fallback_note = "\n\n⚠️ 語境查詞暫時不可用，以上為一般解釋。"
-            return resp.content + fallback_note, None, resp.to_trace()
+            return resp.content + fallback_note, [], resp.to_trace()
 
 
 # 模組層級 singleton

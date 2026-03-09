@@ -147,7 +147,7 @@ class TestWordClassificationDbMiss:
         """DB 無結果時呼叫 structured LLM 解釋並設定 pending_save_with_item。"""
         mock_router = MagicMock()
         mock_router.get_word_explanation_structured = AsyncMock(
-            return_value=("FIT 的意思是...", _SAMPLE_EXTRACTED_ITEM, None)
+            return_value=("FIT 的意思是...", [_SAMPLE_EXTRACTED_ITEM], None)
         )
         mock_get_router.return_value = mock_router
 
@@ -174,7 +174,7 @@ class TestWordClassificationDbMiss:
         mock_router.get_word_explanation_structured.assert_awaited_once_with(
             "FIT", mode="free", target_lang="en"
         )
-        # 應設定 pending_save_with_item（因為有 extracted_item）
+        # 應設定 pending_save_with_item（因為有 1 個 item）
         mock_user_state_repo.set_pending_save_with_item.assert_awaited_once_with(
             "hashed_user", "FIT", _SAMPLE_EXTRACTED_ITEM
         )
@@ -186,18 +186,18 @@ class TestWordClassificationDbMiss:
     @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
     @patch("src.services.router_service.get_router_service")
     @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
-    async def test_fallback_to_plain_pending_when_no_item(
+    async def test_zero_items_no_pending_save(
         self,
         mock_search: AsyncMock,
         mock_get_router: MagicMock,
         mock_hash: MagicMock,
         mock_session_ctx: MagicMock,
     ) -> None:
-        """structured 回傳 item=None → fallback 到 set_pending_save（純文字）。"""
+        """structured 回傳 items=[] → 不設 pending_save，僅回顯示文字。"""
         mock_router = MagicMock()
-        # item 為 None（JSON parse 失敗的 fallback 情境）
+        # 0 items（LLM 無法確定詞條，如候選澄清情境）
         mock_router.get_word_explanation_structured = AsyncMock(
-            return_value=("FIT 的意思是...", None, None)
+            return_value=("FIT 的意思是...", [], None)
         )
         mock_get_router.return_value = mock_router
 
@@ -218,10 +218,67 @@ class TestWordClassificationDbMiss:
         ):
             result = await _handle_unknown("Utest", "FIT", mode="free", target_lang="en")
 
-        # item=None → 應使用舊的 set_pending_save
-        mock_user_state_repo.set_pending_save.assert_awaited_once_with("hashed_user", "FIT")
+        # 0 items → 不設 pending_save
+        mock_user_state_repo.set_pending_save.assert_not_awaited()
         mock_user_state_repo.set_pending_save_with_item.assert_not_awaited()
+        # 回覆僅有 display，不含入庫提示
         assert "FIT 的意思是" in result
+        assert "入庫" not in result
+
+    @pytest.mark.asyncio
+    @patch("src.api.webhook.get_session")
+    @patch("src.api.webhook.hash_user_id", return_value="hashed_user")
+    @patch("src.services.router_service.get_router_service")
+    @patch("src.api.webhook._search_user_items", new_callable=AsyncMock)
+    async def test_multi_items_sets_pending_multi(
+        self,
+        mock_search: AsyncMock,
+        mock_get_router: MagicMock,
+        mock_hash: MagicMock,
+        mock_session_ctx: MagicMock,
+    ) -> None:
+        """structured 回傳 2+ items → set_pending_save_multi。"""
+        item_a = _make_extracted_item("食べる")
+        item_b = _make_extracted_item("飲む")
+        mock_router = MagicMock()
+        mock_router.get_word_explanation_structured = AsyncMock(
+            return_value=("句子分析：食べる、飲む", [item_a, item_b], None)
+        )
+        mock_get_router.return_value = mock_router
+
+        mock_search.return_value = []
+
+        mock_session = AsyncMock()
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+        mock_session_ctx.return_value = mock_session
+
+        mock_user_state_repo = MagicMock()
+        mock_user_state_repo.set_pending_save = AsyncMock()
+        mock_user_state_repo.set_pending_save_with_item = AsyncMock()
+        mock_user_state_repo.set_pending_save_multi = AsyncMock()
+
+        with patch(
+            "src.api.webhook.UserStateRepository",
+            return_value=mock_user_state_repo,
+        ):
+            result = await _handle_unknown(
+                "Utest", "食べて飲む", mode="free", target_lang="ja"
+            )
+
+        # 2 items → set_pending_save_multi
+        mock_user_state_repo.set_pending_save_multi.assert_awaited_once()
+        call_args = mock_user_state_repo.set_pending_save_multi.call_args
+        entries = call_args[0][1]
+        assert len(entries) == 2
+        assert entries[0]["word"] == "食べる"
+        assert entries[1]["word"] == "飲む"
+        # 不應呼叫單一 pending
+        mock_user_state_repo.set_pending_save_with_item.assert_not_awaited()
+        mock_user_state_repo.set_pending_save.assert_not_awaited()
+        # 回覆包含 display 和 pending 提示
+        assert "句子分析" in result
+        assert "入庫" in result
 
 
 # ============================================================================
@@ -287,7 +344,7 @@ class TestMultiWordInput:
         """「red apple」→ compound word（2 token ≤15 字元），整體作為單字解釋。"""
         mock_router = MagicMock()
         mock_router.get_word_explanation_structured = AsyncMock(
-            return_value=("red apple 表示紅蘋果", _SAMPLE_EXTRACTED_ITEM, None)
+            return_value=("red apple 表示紅蘋果", [_SAMPLE_EXTRACTED_ITEM], None)
         )
         mock_get_router.return_value = mock_router
         mock_search.return_value = []

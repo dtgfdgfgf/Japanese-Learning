@@ -1918,7 +1918,7 @@ async def _handle_word_input(
                 return _format_search_results(db_items, show_display=True)
 
             try:
-                display, extracted_item, word_trace = (
+                display, items, word_trace = (
                     await router_service.get_word_explanation_structured(
                         word, mode=mode, target_lang=target_lang
                     )
@@ -1929,15 +1929,30 @@ async def _handle_word_input(
                 logger.exception("Word explanation failed (single word=%s)", word)
                 return Messages.ERROR_WORD_LOOKUP_BUSY
 
+            if not items:
+                # 0 items — LLM 無法確定詞條，僅回顯示不設 pending_save
+                return display
+
+            if len(items) == 1:
+                async with get_session() as session:
+                    user_state_repo = UserStateRepository(session)
+                    await user_state_repo.set_pending_save_with_item(
+                        hashed_user_id, items[0]["surface"], items[0]
+                    )
+                return Messages.format("WORD_EXPLANATION", explanation=display)
+
+            # 2+ items — 句子分析出多詞條
             async with get_session() as session:
                 user_state_repo = UserStateRepository(session)
-                if extracted_item:
-                    await user_state_repo.set_pending_save_with_item(
-                        hashed_user_id, word, extracted_item
-                    )
-                else:
-                    await user_state_repo.set_pending_save(hashed_user_id, word)
-            return Messages.format("WORD_EXPLANATION", explanation=display)
+                entries = [
+                    {"word": item["surface"], "extracted_item": item}
+                    for item in items
+                ]
+                await user_state_repo.set_pending_save_multi(
+                    hashed_user_id, entries
+                )
+            pending_hint = Messages.format("WORD_MULTI_PENDING", count=len(items))
+            return f"{display}\n\n{pending_hint}"
 
         # ── 多單字統一處理 ──
 
@@ -1958,14 +1973,14 @@ async def _handle_word_input(
         if len(db_miss_words) == 1:
             word = db_miss_words[0]
             try:
-                display, extracted_item, word_trace = (
+                display, items, word_trace = (
                     await router_service.get_word_explanation_structured(
                         word, mode=mode, target_lang=target_lang
                     )
                 )
                 if word_trace:
                     llm_traces.append((word_trace, "word_explanation"))
-                llm_result_map[word] = (display, extracted_item)
+                llm_result_map[word] = (display, items[0] if items else None)
             except Exception:
                 logger.exception("Word explanation failed (multi, word=%s)", word)
                 llm_failed = True
@@ -2177,7 +2192,7 @@ async def _handle_article_word_lookup(
             return result + Messages.ARTICLE_WORD_SAVE_REMINDER
 
         # DB 未命中 → LLM 查詞（帶文章語境）
-        display, extracted_item, trace = (
+        display, items, trace = (
             await router_service.get_word_explanation_with_context(
                 word=word_text,
                 article_context=article_text,
@@ -2188,15 +2203,26 @@ async def _handle_article_word_lookup(
         if trace:
             llm_traces.append((trace, "article_word_lookup"))
 
-        # 設定 pending_save
-        async with get_session() as session:
-            repo = UserStateRepository(session)
-            if extracted_item:
+        # 設定 pending_save — 依 items 數量決定
+        if not items:
+            # 0 items — 無法確定詞條，不設 pending_save
+            return display + Messages.ARTICLE_WORD_SAVE_REMINDER
+
+        if len(items) == 1:
+            async with get_session() as session:
+                repo = UserStateRepository(session)
                 await repo.set_pending_save_with_item(
-                    hashed_uid, word_text, extracted_item,
+                    hashed_uid, items[0]["surface"], items[0],
                 )
-            else:
-                await repo.set_pending_save(hashed_uid, word_text)
+        else:
+            # 2+ items
+            async with get_session() as session:
+                repo = UserStateRepository(session)
+                entries = [
+                    {"word": item["surface"], "extracted_item": item}
+                    for item in items
+                ]
+                await repo.set_pending_save_multi(hashed_uid, entries)
 
         explanation = Messages.format(
             "WORD_EXPLANATION", explanation=display,

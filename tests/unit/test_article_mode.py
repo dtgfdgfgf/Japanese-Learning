@@ -195,7 +195,7 @@ class TestHandleArticleWordLookup:
         mock_router = MagicMock()
         mock_trace = MagicMock(input_tokens=50, output_tokens=30)
         mock_router.get_word_explanation_with_context = AsyncMock(
-            return_value=(_SAMPLE_DISPLAY, _SAMPLE_EXTRACTED_ITEM, mock_trace),
+            return_value=(_SAMPLE_DISPLAY, [_SAMPLE_EXTRACTED_ITEM], mock_trace),
         )
         mock_get_router.return_value = mock_router
 
