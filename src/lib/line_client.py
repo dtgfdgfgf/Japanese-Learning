@@ -342,13 +342,15 @@ _MODE_QUICK_REPLY_CONFIG: list[tuple[str, str]] = [
 ]
 
 
-def build_mode_quick_replies(current_mode: str) -> QuickReply:
+def build_mode_quick_replies(current_mode: str, input_type: str = "query") -> QuickReply:
     """建構模式切換 Quick Reply 按鈕。
 
     當前模式加 ✓ 標記。使用 PostbackAction 避免與一般文字混淆。
+    input_type 決定第 4 顆按鈕：顯示可切換的目標類型。
 
     Args:
-        current_mode: 目前的 LLM 模式 (cheap/balanced/rigorous)
+        current_mode: 目前的 LLM 模式 (free/cheap/rigorous)
+        input_type: 目前的輸入類型 (query/ask)，預設 "query"
 
     Returns:
         QuickReply 物件
@@ -365,6 +367,24 @@ def build_mode_quick_replies(current_mode: str) -> QuickReply:
                 ),
             )
         )
+    # 第 4 顆按鈕：切換輸入類型（顯示目標，不是當前狀態）
+    if input_type == "ask":
+        toggle_label = "查詢模式"
+        toggle_target = "query"
+        toggle_text = "切換查詢模式"
+    else:
+        toggle_label = "發問模式"
+        toggle_target = "ask"
+        toggle_text = "切換發問模式"
+    items.append(
+        QuickReplyItem(
+            action=PostbackAction(
+                label=toggle_label,
+                data=f"action=switch_input_type&input_type={toggle_target}",
+                display_text=toggle_text,
+            ),
+        )
+    )
     return QuickReply(items=items)
 
 

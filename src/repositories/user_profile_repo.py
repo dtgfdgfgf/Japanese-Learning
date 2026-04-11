@@ -116,6 +116,26 @@ class UserProfileRepository:
         await self.session.flush()
         return profile
 
+    async def set_input_type(self, user_id: str, input_type: str) -> UserProfile:
+        """切換輸入類型（查詢 / 發問）。
+
+        Args:
+            user_id: Hashed LINE user ID
+            input_type: query / ask
+
+        Returns:
+            更新後的 UserProfile
+
+        Raises:
+            ValueError: 無效的輸入類型
+        """
+        if input_type not in ("query", "ask"):
+            raise ValueError(f"Invalid input_type: {input_type!r}")
+        profile = await self.get_or_create(user_id)
+        profile.input_type = input_type
+        await self.session.flush()
+        return profile
+
     async def add_tokens(self, user_id: str, delta: int) -> UserProfile:
         """原子累加今日已使用 token 數。
 

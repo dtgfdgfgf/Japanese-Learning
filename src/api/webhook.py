@@ -522,6 +522,7 @@ async def handle_message_event(event: MessageEvent) -> None:
         # === Pre-dispatch session：讀取 profile + 檢查 session + pending_save + 模式/語言切換 ===
         current_mode = "free"
         target_lang = "ja"
+        input_type = "query"
         daily_used = 0
         daily_cap = 50000
         parsed = parse_command(text)
@@ -540,11 +541,12 @@ async def handle_message_event(event: MessageEvent) -> None:
                     profile = await profile_repo.get_or_create(hashed_uid)
                     current_mode = profile.mode or "free"
                     target_lang = profile.target_lang or "ja"
+                    input_type = profile.input_type or "query"
                     daily_used = profile.daily_used_tokens or 0
                     daily_cap = profile.daily_cap_tokens_free or 50000
                     logger.debug(
-                        "Profile loaded: mode=%s, target_lang=%s, user=%s",
-                        profile.mode, profile.target_lang, hashed_uid[:8],
+                        "Profile loaded: mode=%s, target_lang=%s, input_type=%s, user=%s",
+                        profile.mode, profile.target_lang, input_type, hashed_uid[:8],
                     )
                 except Exception as e:
                     logger.warning("Failed to load user profile, using defaults: %s", e)
@@ -722,6 +724,19 @@ async def handle_message_event(event: MessageEvent) -> None:
                 response = Messages.format("LANG_SWITCH_INVALID")
         elif (
             parsed.command_type == CommandType.UNKNOWN
+            and input_type == "ask"
+            and not has_session
+            and not has_article_mode
+            and not has_pending_save
+            and not has_pending_delete
+        ):
+            # 發問模式：跳過詞彙分類，直接送 LLM 回答
+            response = await _with_thinking_indicator(
+                user_id,
+                _handle_ask_mode(hashed_uid, text, current_mode, target_lang),
+            )
+        elif (
+            parsed.command_type == CommandType.UNKNOWN
             and text.strip().isdigit()
             and not has_pending_delete
             and not has_pending_save
@@ -781,7 +796,7 @@ async def handle_message_event(event: MessageEvent) -> None:
         full_response = f"{response}\n\n{footer}"
 
         # 使用 Quick Reply 發送（reply 失敗時 fallback 至 Push API）
-        quick_reply = build_mode_quick_replies(current_mode)
+        quick_reply = build_mode_quick_replies(current_mode, input_type)
         replied = await line_client.reply_with_quick_reply(
             reply_token, full_response, quick_reply
         )
@@ -830,10 +845,12 @@ async def handle_postback_event(event: PostbackEvent) -> None:
         data = parse_qs(event.postback.data) if event.postback else {}
         action = data.get("action", [None])[0]
         mode = data.get("mode", [None])[0]
+        input_type_param = data.get("input_type", [None])[0]
 
         if action == "switch_mode" and mode in ("free", "cheap", "rigorous"):
             daily_used = 0
             daily_cap = 50000
+            current_input_type = "query"
             mode_set_ok = False
             try:
                 async with get_session() as session:
@@ -841,6 +858,7 @@ async def handle_postback_event(event: PostbackEvent) -> None:
                     profile = await repo.set_mode(hashed_uid, mode)
                     daily_used = profile.daily_used_tokens or 0
                     daily_cap = profile.daily_cap_tokens_free or 50000
+                    current_input_type = profile.input_type or "query"
                     mode_set_ok = True
             except Exception as e:
                 logger.warning("Failed to set mode via postback: %s", e, exc_info=True)
@@ -860,7 +878,7 @@ async def handle_postback_event(event: PostbackEvent) -> None:
                 mode=mode,
             )
             full_response = f"{confirm_msg}\n\n{footer}"
-            quick_reply = build_mode_quick_replies(mode)
+            quick_reply = build_mode_quick_replies(mode, current_input_type)
             replied = await line_client.reply_with_quick_reply(
                 reply_token, full_response, quick_reply
             )
@@ -869,6 +887,50 @@ async def handle_postback_event(event: PostbackEvent) -> None:
                 await line_client.push_message_with_quick_reply(
                     user_id, full_response, quick_reply
                 )
+
+        elif action == "switch_input_type" and input_type_param in ("query", "ask"):
+            current_mode = "free"
+            daily_used = 0
+            daily_cap = 50000
+            input_type_set_ok = False
+            try:
+                async with get_session() as session:
+                    repo = UserProfileRepository(session)
+                    profile = await repo.set_input_type(hashed_uid, input_type_param)
+                    current_mode = profile.mode or "free"
+                    daily_used = profile.daily_used_tokens or 0
+                    daily_cap = profile.daily_cap_tokens_free or 50000
+                    input_type_set_ok = True
+            except Exception as e:
+                logger.warning("Failed to set input_type via postback: %s", e, exc_info=True)
+
+            if not input_type_set_ok:
+                await line_client.reply_message(reply_token, Messages.ERROR_GENERIC)
+                return
+
+            if input_type_param == "ask":
+                confirm_msg = "✅ 已切換至發問模式\n直接輸入問題，我會回答你！"
+            else:
+                confirm_msg = "✅ 已切換至查詢模式\n輸入單字或句子，我會幫你解析！"
+
+            footer = format_usage_footer(
+                daily_used=daily_used,
+                daily_cap=daily_cap,
+                in_tokens=0,
+                out_tokens=0,
+                mode=current_mode,
+            )
+            full_response = f"{confirm_msg}\n\n{footer}"
+            quick_reply = build_mode_quick_replies(current_mode, input_type_param)
+            replied = await line_client.reply_with_quick_reply(
+                reply_token, full_response, quick_reply
+            )
+            if not replied:
+                logger.warning("Postback reply failed, falling back to Push API")
+                await line_client.push_message_with_quick_reply(
+                    user_id, full_response, quick_reply
+                )
+
         else:
             logger.warning("Unknown postback: %s", event.postback.data if event.postback else "None")
     except Exception as e:
@@ -1783,6 +1845,37 @@ async def _handle_delete_confirm(line_user_id: str) -> str:
         except Exception as e:
             logger.error("Clear all failed: %s", e)
             return Messages.ERROR_CLEAR
+
+
+async def _handle_ask_mode(
+    hashed_user_id: str,
+    message: str,
+    mode: str = "free",
+    target_lang: str = "ja",
+) -> str:
+    """發問模式：跳過詞彙分類，直接送 LLM 回答，並寫入 usage log。"""
+    from src.repositories.api_usage_log_repo import ApiUsageLogRepository
+    from src.services.router_service import get_router_service
+
+    router_service = get_router_service()
+    try:
+        resp = await router_service.get_chat_response(
+            message, mode=mode, target_lang=target_lang
+        )
+        try:
+            async with get_session() as session:
+                repo = ApiUsageLogRepository(session)
+                await repo.create_log(
+                    user_id=hashed_user_id,
+                    trace=resp.to_trace(),
+                    operation="ask",
+                )
+        except Exception:
+            logger.warning("Failed to write ask mode LLM trace to DB", exc_info=True)
+        return resp.content
+    except Exception as e:
+        logger.error("Ask mode LLM call failed: %s", e)
+        return Messages.ERROR_GENERIC
 
 
 async def _handle_unknown(

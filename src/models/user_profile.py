@@ -47,6 +47,13 @@ class UserProfile(Base):
         server_default="free",
         comment="LLM mode: free/cheap/rigorous",
     )
+    input_type: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="query",
+        server_default="query",
+        comment="Input routing: query/ask",
+    )
     daily_cap_tokens_free: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
